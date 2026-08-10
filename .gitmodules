@@ -1,3 +1,6 @@
 [submodule "deps/NeuralAudio"]
 	path = deps/NeuralAudio
 	url = https://github.com/mikeoliphant/NeuralAudio
+[submodule "deps/dr_libs"]
+	path = deps/dr_libs
+	url = https://github.com/mackron/dr_libs
