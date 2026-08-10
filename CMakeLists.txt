@@ -12,6 +12,7 @@ set(SOURCES
 
 add_executable(NeuralCpuTrainer ${SOURCES})
 target_include_directories(NeuralCpuTrainer PUBLIC deps/NeuralAudio/NeuralAudio)
+target_include_directories(NeuralCpuTrainer PUBLIC deps/dr_libs)
 target_link_libraries(NeuralCpuTrainer PUBLIC NeuralAudio)
 
 source_group(NeuralCpuTrainer ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})

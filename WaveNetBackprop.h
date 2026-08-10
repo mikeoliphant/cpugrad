@@ -13,6 +13,12 @@ namespace NeuralCpuTrain
 	template <typename T>
 	class BackpropModelBaseT
 	{
+		static std::mt19937& getRand() {
+			// Initialized only once upon the first function call
+			static std::mt19937 engine(123);
+			return engine;
+		}
+
 		public:
 			BackpropModelBaseT() {}
 
@@ -56,7 +62,6 @@ namespace NeuralCpuTrain
 			{
 				double stddev = std::sqrt(2.0 / (double)numFeatures);
 				std::normal_distribution<double> dist(0.0, stddev);
-				std::mt19937 rng(123);
 
 				size_t numWeights = GetNumWeights();
 
@@ -64,7 +69,7 @@ namespace NeuralCpuTrain
 
 				for (size_t i = 0; i < numWeights; i++)
 				{
-					weights[i] = (float)dist(rng);
+					weights[i] = (float)dist(getRand());
 				}
 
 				auto it = weights.begin();
@@ -268,8 +273,6 @@ namespace NeuralCpuTrain
 
 				for (size_t k = 0; k < KernelSize; k++)
 				{
-					const T* weightPtr = this->weights[k].GetDataConst();
-
 					const auto offset = Dilation * ((int)k + 1 - KernelSize);
 
 					const size_t validSize = numFrames + offset;
@@ -296,8 +299,6 @@ namespace NeuralCpuTrain
 
 				for (size_t k = 0; k < KernelSize; ++k)
 				{
-					const T* weightPtr = this->weights[k].GetDataConst();
-
 					const auto offset = Dilation * ((int)k + 1 - KernelSize);
 
 					const size_t validSize = numFrames + offset;
