@@ -8,6 +8,7 @@ add_subdirectory(deps/NeuralAudio NeuralAudio)
 
 set(SOURCES
 	NeuralCpuTrainer.cpp
+	ModelTrainer.h
 	WaveNetBackprop.h)
 
 add_executable(NeuralCpuTrainer ${SOURCES})

@@ -3,110 +3,26 @@
 #include <random>
 #include <cassert>
 #include <cmath>
+#include <filesystem>
 
-#include "dr_wav.h"
+#define DR_WAV_IMPLEMENTATION
 #include "WaveNet.h"
 #include "WaveNetBackprop.h"
+#include "ModelTrainer.h"
 
-#define BATCH_SIZE 8192
+#define BATCH_SIZE 131072
+
 
 using namespace NeuralAudio;
 using namespace NeuralCpuTrain;
-
-static void TestModel(BackpropModelT<float, 1, 1>& modelBackprop, const ChannelRowSpan<float, 1>& input, const ChannelRowSpan<float, 1>& target)
-{
-	assert(input.GetNumCols() == target.GetNumCols());
-
-	size_t totalSize = input.GetNumCols();
-
-	const size_t batchSize = BATCH_SIZE;
-
-	modelBackprop.RandomizeWeights();
-
-	size_t receptiveField = modelBackprop.GetReceptiveField();
-	size_t validSampleCount = batchSize - receptiveField;
-
-	ChannelBuffer<float, 1, batchSize> batchInput;
-	ChannelBuffer<float, 1, batchSize> batchTarget;
-	ChannelBuffer<float, 1, batchSize> forwardOutput;
-	ChannelBuffer<float, 1, batchSize> outputGradient;
-	ChannelBuffer<float, 1, batchSize> layerOutputGradient;
-
-	for (int iter = 0; iter < 20000; ++iter)
-	{
-		size_t currentOffset = 0;
-		int samplesRemaining = (int)totalSize;
-
-		while (samplesRemaining > 0)
-		{
-			size_t thisBatchSize = std::min((size_t)samplesRemaining, batchSize);
-
-			auto batchInMap = batchInput.Slice(thisBatchSize).GetEigenMap();
-			batchInMap.noalias() = input.Slice(currentOffset, thisBatchSize).GetEigenMapConst();
-
-			auto batchTargetMap = batchTarget.Slice(thisBatchSize).GetEigenMap();
-			batchTargetMap.noalias() = target.Slice(currentOffset, thisBatchSize).GetEigenMapConst();
-
-			forwardOutput.SetZero();
-
-			modelBackprop.Reset();
-
-			modelBackprop.Forward(batchInput, forwardOutput);
-
-			auto map = outputGradient.GetEigenMap();
-
-			double totErr = 0.0;
-
-			for (size_t i = 0; i < thisBatchSize; i++)
-			{
-				if (i < receptiveField)
-				{
-					map(i) = 0.0f;
-				}
-				else
-				{
-					float diff = forwardOutput(0, i) - batchTarget(0, i);
-
-					map(i) = 2.0f * diff;
-
-					totErr += diff * diff;
-				}
-			}
-
-			std::cout << "Iter: " << iter << " MSE: " << (totErr / static_cast<float>(validSampleCount)) << std::endl;
-
-			modelBackprop.Backward(batchInput, outputGradient, layerOutputGradient);
-
-			modelBackprop.DivideWeights(static_cast<float>((float)validSampleCount));
-
-			modelBackprop.ApplyGradients(0.05f);
-
-			currentOffset += validSampleCount;
-			samplesRemaining -= (int)validSampleCount;
-		}
-	}
-}
-
-static void TestIdentity(BackpropModelT<float, 1, 1>& modelBackprop)
-{
-	const size_t totalSamples = 48000;
-
-	ChannelBuffer<float, 1, totalSamples> input;
-	ChannelBuffer<float, 1, totalSamples> target;
-
-	for (size_t i = 0; i < totalSamples; ++i)
-	{
-		input(0, i) = std::sin(static_cast<float>(i) * 0.01f);
-		target(0, i) = input(0, i);
-	}
-
-	TestModel(modelBackprop, input, target);
-}
 
 template <typename T, int ConditionSize, int Channels, int KernelSize, int Dilation>
 class WaveNetLayerBackpropT : public BackpropModelT<T, Channels, Channels>
 {
 public:
+	using BackpropModelT<T, Channels, Channels>::Forward;
+	using BackpropModelT<T, Channels, Channels>::Backward;
+
 	void Forward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, ConditionSize>& condition, const ChannelRowSpan<T, Channels>& output, const ChannelRowSpan<T, Channels>& headOutput)
 	{
 		conv.Forward(input, convOut);
@@ -214,19 +130,42 @@ private:
 	ChannelBuffer<T, Channels, BATCH_SIZE> dReluOut;
 };
 
-
-template <typename T, int InOutChannels, int Channels>
+template <typename T, int InOutChannels, int Channels, typename KernelSizeSequence, typename DilationsSequence>
 class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 {
+	template <typename, typename>
+	struct LayersHelper
+	{};
+
+	template <int... dilationVals, int... kernelSizeVals>
+	struct LayersHelper<KernelSizes<kernelSizeVals...>, Dilations<dilationVals...>>
+	{
+		using type = std::tuple<WaveNetLayerBackpropT<T, InOutChannels, Channels, kernelSizeVals, dilationVals>...>;
+	};
+
+	using Layers = typename LayersHelper<KernelSizeSequence, DilationsSequence>::type;
+
 	public:
+		Layers layers;
+		static constexpr auto NumLayers = std::tuple_size_v<decltype (layers)>;
+
 		void Forward(const ChannelRowSpan<T, InOutChannels>& input, const ChannelRowSpan<T, InOutChannels>& output) override
 		{
 			headOutput.SetZero();
 
 			layerArrayRechannel.Forward(input, layerArrayRechannelOut);
 
-			layer1.Forward(layerArrayRechannelOut, input, layer1Out, headOutput);
-			layer2.Forward(layer1Out, input, layer2Out, headOutput);
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					if constexpr (layerIndex == 0)
+					{
+						std::get<layerIndex>(layers).Forward(layerArrayRechannelOut, input, layerOuts[layerIndex], headOutput);
+					}
+					else
+					{
+						std::get<layerIndex>(layers).Forward(layerOuts[layerIndex - 1], input, layerOuts[layerIndex], headOutput);
+					}
+				});
 
 			headRechannel.Forward(headOutput, output);
 
@@ -241,28 +180,59 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 
 			headRechannel.Backward(headOutput, dOutput, dHeadRechannelOut);
 
-			layer2.BackwardNoLayerOutput(layer1Out, input, dHeadRechannelOut, dLayer2Out);
-			layer1.Backward(layerArrayRechannelOut, input, dLayer2Out, dHeadRechannelOut, dLayer1Out);
+			ForEachIndex<NumLayers>([&](auto layerIndexForward)
+				{
+					constexpr auto layerIndexBackward = NumLayers - 1 - layerIndexForward;
 
-			layerArrayRechannel.Backward(input, dLayer1Out, dInput);
+					if constexpr (layerIndexForward == 0)
+					{
+						std::get<layerIndexBackward>(layers).BackwardNoLayerOutput(layerOuts[layerIndexBackward - 1], input, dHeadRechannelOut, dLayerOuts[layerIndexBackward]);
+					}
+					else if constexpr (layerIndexBackward > 0)
+					{
+						std::get<layerIndexBackward>(layers).Backward(layerOuts[layerIndexBackward - 1], input, dLayerOuts[layerIndexBackward + 1], dHeadRechannelOut, dLayerOuts[layerIndexBackward]);
+					}
+					else  // Last layer
+					{
+						std::get<layerIndexBackward>(layers).Backward(layerArrayRechannelOut, input, dLayerOuts[layerIndexBackward + 1], dHeadRechannelOut, dLayerOuts[layerIndexBackward]);
+					}
+				});
+
+			layerArrayRechannel.Backward(input, dLayerOuts[0], dInput);
 		}
 
 		size_t GetReceptiveField() override
 		{
-			return layer1.GetReceptiveField() + layer2.GetReceptiveField() + headRechannel.GetReceptiveField();
+			size_t fieldSize = 0;
+
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+			{
+				fieldSize += std::get<layerIndex>(layers).GetReceptiveField();
+			});
+
+			return fieldSize + headRechannel.GetReceptiveField();
 		}
 
 		size_t GetNumWeights() override
 		{
-			return layer1.GetNumWeights() + layer2.GetNumWeights() + layerArrayRechannel.GetNumWeights() + headRechannel.GetNumWeights();
+			size_t numWeights = 0;
+
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					numWeights += std::get<layerIndex>(layers).GetNumWeights();
+				});
+
+			return numWeights + headRechannel.GetNumWeights();
 		}
 
 		void SetWeights(std::vector<float>::iterator& inWeights) override
 		{
 			layerArrayRechannel.SetWeights(inWeights);
 
-			layer1.SetWeights(inWeights);
-			layer2.SetWeights(inWeights);
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					std::get<layerIndex>(layers).SetWeights(inWeights);
+				});
 
 			headRechannel.SetWeights(inWeights);
 		}
@@ -272,13 +242,12 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 			layerArrayRechannel.Reset();
 			layerArrayRechannelOut.SetZero();
 
-			layer1.Reset();
-			layer1Out.SetZero();
-			dLayer1Out.SetZero();
-
-			layer2.Reset();
-			layer2Out.SetZero();
-			dLayer2Out.SetZero();
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					std::get<layerIndex>(layers).Reset();
+					layerOuts[layerIndex].SetZero();
+					dLayerOuts[layerIndex].SetZero();
+				});
 
 			headRechannel.Reset();
 			dHeadRechannelOut.SetZero();
@@ -287,8 +256,12 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 		void RandomizeWeights() override
 		{
 			layerArrayRechannel.RandomizeWeights();
-			layer1.RandomizeWeights();
-			layer2.RandomizeWeights();
+
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					std::get<layerIndex>(layers).RandomizeWeights();
+				});
+
 			headRechannel.RandomizeWeights();
 		}
 
@@ -296,8 +269,10 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 		{
 			layerArrayRechannel.DivideWeights(divisor);
 
-			layer1.DivideWeights(divisor);
-			layer2.DivideWeights(divisor);
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					std::get<layerIndex>(layers).DivideWeights(divisor);
+				});
 
 			headRechannel.DivideWeights(divisor);
 		}
@@ -306,8 +281,10 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 		{
 			layerArrayRechannel.ApplyGradients(scale);
 
-			layer1.ApplyGradients(scale);
-			layer2.ApplyGradients(scale);
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					std::get<layerIndex>(layers).ApplyGradients(scale);
+				});
 
 			headRechannel.ApplyGradients(scale);
 		}
@@ -315,19 +292,24 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 	private:
 		DenseBackpropT<T, InOutChannels, Channels, false> layerArrayRechannel;
 		ChannelBuffer<T, Channels, BATCH_SIZE> layerArrayRechannelOut;
-		ChannelBuffer<T, Channels, BATCH_SIZE> dLayer1Out;
-		WaveNetLayerBackpropT<T, InOutChannels, Channels, 3, 1> layer1;
-		ChannelBuffer<T, Channels, BATCH_SIZE> layer1Out;
-		WaveNetLayerBackpropT<T, InOutChannels, Channels, 3, 2> layer2;
-		ChannelBuffer<T, Channels, BATCH_SIZE> layer2Out;
-		ChannelBuffer<T, Channels, BATCH_SIZE> dLayer2Out;
+
+		ChannelBuffer<T, Channels, BATCH_SIZE> layerOuts[NumLayers];
+		ChannelBuffer<T, Channels, BATCH_SIZE> dLayerOuts[NumLayers];
+
 		ChannelBuffer<T, Channels, BATCH_SIZE> headOutput;
 		Conv1DBackpropT<T, Channels, InOutChannels, 16, true, 1> headRechannel;
 		ChannelBuffer<T, Channels, BATCH_SIZE> dHeadRechannelOut;
 };
 
+//using A2KernelSizes = std::integer_sequence<int, 6, 6>;
+//using A2Dilations = std::integer_sequence<int, 1, 3>;
+
+using A2KernelSizes = std::integer_sequence<int, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
+using A2Dilations = std::integer_sequence<int, 1, 3, 7, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
+
 int main()
 {
+	
 	//DenseBackpropT<float, 1, 1, false> modelBackprop;
 	//TestModel(modelBackprop);
 
@@ -337,8 +319,13 @@ int main()
 	//WaveNetLayerBackpropT<float, 1, 3, 1> wn;
 	//TestModel(wn);
 
-	auto a2 = new A2BackpropT<float, 1, 3>();
-	TestIdentity(*a2);
+	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
+
+	auto modelTrainer = new ModelTrainerT<BATCH_SIZE>(*a2);
+
+	modelTrainer->TestIdentity();
+
+	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\TZ3-sweep-v3.wav)", R"(C:\Share\Recordings\NAM\BossSD1CaptureNeuralAudio.wav)");
 
 	//ChainBackpropModelT<float, 1, 1> chainBackProp;
 

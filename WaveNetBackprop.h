@@ -214,6 +214,16 @@ namespace NeuralCpuTrain
 				return forwardLayer.GetNumWeights();
 			}
 
+			void RandomizeWeights() override
+			{
+				BackpropModelT<T, InSize, OutSize>::RandomizeWeights();
+
+				if constexpr (DoBias)
+				{
+					forwardLayer.GetBias().setZero();
+				}
+			}
+
 			void SetWeights(std::vector<float>::iterator& inWeights) override
 			{
 				forwardLayer.SetWeights(inWeights);
@@ -328,6 +338,16 @@ namespace NeuralCpuTrain
 			size_t GetNumWeights() override
 			{
 				return OutChannels * InChannels * KernelSize + (DoBias ? OutChannels : 0);
+			}
+
+			void RandomizeWeights() override
+			{
+				BackpropModelT<T, InChannels, OutChannels>::RandomizeWeights();
+
+				if constexpr (DoBias)
+				{
+					bias.setZero();
+				}
 			}
 
 			void SetWeights(std::vector<float>::iterator& inWeights) override
