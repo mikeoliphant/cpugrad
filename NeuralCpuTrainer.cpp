@@ -103,13 +103,6 @@ public:
 		dReluOut.SetZero();
 	}
 
-	void DivideWeights(float divisor) override
-	{
-		conv.DivideWeights(divisor);
-		conditionMixIn.DivideWeights(divisor);
-		oneByOne.DivideWeights(divisor);
-	}
-
 	void ApplyGradients(float scale) override
 	{
 		conv.ApplyGradients(scale);
@@ -265,18 +258,6 @@ class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 			headRechannel.RandomizeWeights();
 		}
 
-		void DivideWeights(float divisor) override
-		{
-			layerArrayRechannel.DivideWeights(divisor);
-
-			ForEachIndex<NumLayers>([&](auto layerIndex)
-				{
-					std::get<layerIndex>(layers).DivideWeights(divisor);
-				});
-
-			headRechannel.DivideWeights(divisor);
-		}
-
 		void ApplyGradients(float scale) override
 		{
 			layerArrayRechannel.ApplyGradients(scale);
@@ -310,10 +291,16 @@ using A2Dilations = std::integer_sequence<int, 1, 3, 7, 17, 41, 101, 239, 1, 3, 
 int main()
 {
 	
-	//DenseBackpropT<float, 1, 1, false> modelBackprop;
-	//TestModel(modelBackprop);
+	//DenseBackpropT<float, 1, 1, false> dense;
+	//auto denseTrainter = new ModelTrainerT<BATCH_SIZE>(dense);
 
-	//Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
+	//denseTrainter->TestIdentity();
+
+	Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
+	auto convTrainer = new ModelTrainerT<float, BATCH_SIZE>(convBackprop);
+
+	convTrainer->TestDelay(2);
+
 	//TestModel(convBackprop);
 
 	//WaveNetLayerBackpropT<float, 1, 3, 1> wn;
@@ -321,9 +308,9 @@ int main()
 
 	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
-	auto modelTrainer = new ModelTrainerT<BATCH_SIZE>(*a2);
+	auto modelTrainer = new ModelTrainerT<float, BATCH_SIZE>(*a2);
 
-	modelTrainer->TestIdentity();
+	modelTrainer->TestDelay(0);
 
 	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\TZ3-sweep-v3.wav)", R"(C:\Share\Recordings\NAM\BossSD1CaptureNeuralAudio.wav)");
 

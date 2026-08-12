@@ -83,9 +83,6 @@ namespace NeuralCpuTrain
 			virtual void Reset()
 			{}
 
-			virtual void DivideWeights(float divisor)
-			{}
-
 			virtual void ApplyGradients(float scale)
 			{}
 
@@ -239,18 +236,6 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void DivideWeights(float divisor) override
-			{
-				auto map = dWeights.GetEigenMap();
-
-				map /= divisor;
-
-				if constexpr (DoBias)
-				{
-					dBias /= divisor;
-				}
-			}
-
 			void ApplyGradients(float scale) override
 			{
 				auto map = forwardLayer.GetWeights().GetEigenMap();
@@ -374,21 +359,6 @@ namespace NeuralCpuTrain
 				if constexpr (DoBias)
 				{
 					dBias.setZero();
-				}
-			}
-
-			void DivideWeights(float divisor) override
-			{
-				for (int k = 0; k < KernelSize; k++)
-				{
-					auto map = dWeights[k].GetEigenMap();
-
-					map /= divisor;
-				}
-
-				if constexpr (DoBias)
-				{
-					dBias /= divisor;
 				}
 			}
 
