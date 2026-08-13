@@ -13,14 +13,23 @@ namespace NeuralCpuTrain
 	{
 		public:
 			virtual ~LossT() = default;
+			virtual std::string& GetName() { return name; }
 			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, size_t receptiveFieldSize) = 0;
-			virtual T GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) = 0;
+			virtual double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) = 0;
+
+		protected:
+			std::string name;
 	};
 
 	template <typename T>
 	class MSELossT : public LossT<T>
 	{
 		public:
+			MSELossT()
+			{
+				this->name = "MSE";
+			}
+
 			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize) override
 			{
 				for (size_t t = 0; t < numSamples; t++)
@@ -28,25 +37,79 @@ namespace NeuralCpuTrain
 					if (t < receptiveFieldSize)
 						outGradient[t] = 0;
 					else
-						outGradient[t] = TCONST(2) * (output[t] - target[t]);
+						outGradient[t] = (TCONST(2) * (output[t] - target[t])) / static_cast<T>(numSamples - receptiveFieldSize);
 				}
 			}
 
-			T GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) override
+			double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) override
 			{
 				T tot = TCONST(0);
 
-				for (size_t t = 0; t < numSamples; t++)
+				for (size_t t = receptiveFieldSize; t < numSamples; t++)
 				{
-					if (t >= receptiveFieldSize)
-					{
-						T diff = output[t] - target[t];
-						tot += (diff * diff);
-					}
+					T diff = output[t] - target[t];
+					tot += (diff * diff);
 				}
 
 				return tot;
 			}
+	};
+
+	template <typename T>
+	class ESRLossT : public LossT<T>
+	{
+		static constexpr T epsilon = TCONST(1e-8);
+
+	public:
+		ESRLossT()
+		{
+			this->name = "ESR";
+		}
+
+		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize) override
+		{
+			double totEnergy = 0;
+
+			for (size_t t = receptiveFieldSize; t < numSamples; t++)
+			{
+				totEnergy += (target[t] * target[t]);
+			}
+
+			totEnergy += epsilon;
+
+			for (size_t t = 0; t < numSamples; t++)
+			{
+				if (t < receptiveFieldSize)
+					outGradient[t] = 0;
+				else
+					outGradient[t] = (TCONST(2) * (output[t] - target[t])) / static_cast<T>(totEnergy);
+			}
+		}
+
+		double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) override
+		{
+			double totEnergy = 0;
+
+			for (size_t t = receptiveFieldSize; t < numSamples; t++)
+			{
+				totEnergy += (target[t] * target[t]);
+			}
+
+			totEnergy += epsilon;
+
+			T tot = TCONST(0);
+
+			for (size_t t = 0; t < numSamples; t++)
+			{
+				if (t >= receptiveFieldSize)
+				{
+					T diff = output[t] - target[t];
+					tot += (diff * diff);
+				}
+			}
+
+			return (tot / totEnergy) * static_cast<T>(numSamples - receptiveFieldSize);
+		}
 	};
 
 	template <typename T, int BatchSize>
@@ -55,11 +118,11 @@ namespace NeuralCpuTrain
 		public:
 			ModelTrainerT(BackpropModelT<T, 1, 1>& modelBackprop) :
 				modelBackprop(modelBackprop),
-				lossFunction(std::make_unique<MSELossT<T>>())
+				lossFunction(std::make_unique<ESRLossT<T>>())
 			{
 			}
 
-			float VerifyModel(const T* input, const T* target, const size_t totalSamples)
+			double VerifyModel(const T* input, const T* target, const size_t totalSamples)
 			{
 				size_t receptiveField = modelBackprop.GetReceptiveField();
 				size_t validSampleCount = BatchSize - receptiveField;
@@ -96,6 +159,8 @@ namespace NeuralCpuTrain
 
 			void TrainModel(const float* input, const float* target, const size_t totalSamples, const float* verifyInput, const float* verifyTarget, const size_t verifySamples)
 			{
+				float learningRate = 0.0005f;
+
 				modelBackprop.RandomizeWeights();
 
 				size_t receptiveField = modelBackprop.GetReceptiveField();
@@ -125,25 +190,34 @@ namespace NeuralCpuTrain
 						lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), thisBatchSize, receptiveField);
 
 						modelBackprop.Backward(batchInput.Slice(thisBatchSize), outputGradient.Slice(thisBatchSize), layerOutputGradient.Slice(thisBatchSize));
-
-						modelBackprop.ApplyGradients(0.005f / (float)validSampleCount);
+						
+						modelBackprop.ApplyGradients(learningRate);
 
 						currentOffset += validSampleCount;
 						samplesRemaining -= (int)validSampleCount;
 					}
 
-					float mse = VerifyModel(verifyInput, verifyTarget, verifySamples);
+					double err = VerifyModel(verifyInput, verifyTarget, verifySamples);
 
-					std::cout << "Iter: " << iter << " MSE: " << mse << std::endl;
+					std::cout << "Iter: " << iter << " " << lossFunction->GetName() << ": " << err << std::endl;
 				}
+			}
+
+			std::vector<float> GenerateSin(size_t numSamples)
+			{
+				std::vector<float> data(numSamples);
+
+				for (size_t i = 0; i < numSamples; i++)
+					data[i] = (float)std::sin(i * 0.01);
+
+				return data;
 			}
 
 			std::vector<float> GenerateRandom(size_t numSamples)
 			{
 				std::vector<float> rand(numSamples);
 
-				std::random_device rd;
-				std::mt19937 gen(rd());
+				std::mt19937 gen(123);
 
 				std::uniform_real_distribution<float> dis(0.0f, 1.0f);
 
