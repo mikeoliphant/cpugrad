@@ -6,6 +6,8 @@
 #include <vector>
 #include <format>
 
+#define BATCH_SIZE 8192 // 131072
+
 using namespace NeuralAudio;
 
 namespace NeuralCpuTrain
@@ -15,13 +17,19 @@ namespace NeuralCpuTrain
 	{
 		public:
 			WeightGradT() :
-				weightPtr(nullptr)
+				weightPtr(nullptr),
+				t(0)
 			{
+				std::fill(m, m + NumWeights, T(0));
+				std::fill(v, v + NumWeights, T(0));
 			}
 
 			WeightGradT(WeightType& weights) :
-				weightPtr(&weights)
+				weightPtr(&weights),
+				t(0)
 			{
+				std::fill(m, m + NumWeights, T(0));
+				std::fill(v, v + NumWeights, T(0));
 			}
 
 			~WeightGradT() = default;
@@ -39,20 +47,62 @@ namespace NeuralCpuTrain
 			virtual T* GetData(WeightType& w) = 0;
 			virtual const T* GetDataConst(WeightType& w) const = 0;
 
-			void ApplyGradients(float scale)
+			void ApplyGradients(float learningRate,
+				float maxNorm = 1.0f,
+				float weightDecay = 0.01f,
+				float beta1 = 0.9f,
+				float beta2 = 0.999f,
+				float epsilon = 1e-8f)
 			{
+				if (!weightPtr) return;
+
 				T* wp = GetData(*weightPtr);
 				const T* dwp = GetDataConst(dWeights);
 
+				// 1. Calculate the L2 Norm (Euclidean length) of the entire gradient block
+				double totalSumSq = 0.0;
 				for (size_t w = 0; w < NumWeights; w++)
 				{
-					wp[w] -= dwp[w] * scale;
+					totalSumSq += static_cast<double>(dwp[w] * dwp[w]);
+				}
+				float gradNorm = std::sqrt(static_cast<float>(totalSumSq));
+
+				// 2. Determine scaling factor if norm exceeds our max allowed threshold
+				float scaleFactor = 1.0f;
+				if (gradNorm > maxNorm && gradNorm > 0.0f)
+				{
+					scaleFactor = maxNorm / gradNorm;
+				}
+
+				t++;
+				const float biasCorrection1 = 1.0f - (float)std::pow(beta1, t);
+				const float biasCorrection2 = 1.0f - (float)std::pow(beta2, t);
+
+				for (size_t w = 0; w < NumWeights; w++)
+				{
+					// Apply scaling factor to the gradient uniformly
+					float clipped_dw = dwp[w] * scaleFactor;
+
+					// AdamW Parameter Updates
+					wp[w] -= learningRate * weightDecay * wp[w];
+
+					m[w] = beta1 * m[w] + (1.0f - beta1) * clipped_dw;
+					v[w] = beta2 * v[w] + (1.0f - beta2) * (clipped_dw * clipped_dw);
+
+					float m_hat = m[w] / biasCorrection1;
+					float v_hat = v[w] / biasCorrection2;
+
+					wp[w] -= (learningRate * m_hat) / ((float)std::sqrt(v_hat + epsilon));
 				}
 			}
 
 		protected:
 			WeightType* weightPtr;
 			WeightType dWeights;
+
+			T m[NumWeights]; // First moment vector (moving average of gradients)
+			T v[NumWeights]; // Second moment vector (moving average of squared gradients)
+			int t;           // Timestep counter
 	};
 
 	template <typename T, typename WeightType, int NumWeights>
@@ -366,6 +416,9 @@ namespace NeuralCpuTrain
 				{
 					const auto offset = Dilation * ((int)k + 1 - KernelSize);
 
+					if (numFrames < -offset)
+						continue;
+
 					const size_t validSize = numFrames + offset;
 
 					const auto inBlock = input.Slice(0, validSize);
@@ -391,6 +444,9 @@ namespace NeuralCpuTrain
 				for (size_t k = 0; k < KernelSize; ++k)
 				{
 					const auto offset = Dilation * ((int)k + 1 - KernelSize);
+
+					if (numFrames < -offset)
+						continue;
 
 					const size_t validSize = numFrames + offset;
 

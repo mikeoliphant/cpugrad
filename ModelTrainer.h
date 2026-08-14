@@ -159,7 +159,7 @@ namespace NeuralCpuTrain
 
 			void TrainModel(const float* input, const float* target, const size_t totalSamples, const float* verifyInput, const float* verifyTarget, const size_t verifySamples)
 			{
-				float learningRate = 0.0005f;
+				float learningRate = 0.005f;
 
 				modelBackprop.RandomizeWeights();
 
@@ -238,7 +238,7 @@ namespace NeuralCpuTrain
 
 			void TestDelay(size_t delay)
 			{
-				const size_t totalSamples = 48000 * 10;
+				const size_t totalSamples = 48000;// * 10;
 
 				auto rand = GenerateRandom(totalSamples);
 
