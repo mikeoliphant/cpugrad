@@ -112,6 +112,48 @@ namespace NeuralCpuTrain
 		}
 	};
 
+	struct TrainingDataBatch
+	{
+		size_t Offset;
+		size_t Size;
+	};
+
+	class TrainingData
+	{
+		public:
+			TrainingData(size_t trainingOffset, size_t trainingSamples, size_t batchSize) :
+				gen(123)
+			{
+				batches.reserve((trainingSamples / batchSize) + 1);
+
+				int samplesRemaining = (int)trainingSamples;
+				size_t currentOffset = trainingOffset;
+
+				while (samplesRemaining > 0)
+				{
+					batches.emplace_back(currentOffset, std::min((size_t)samplesRemaining, batchSize) );
+
+					currentOffset += batchSize;
+					samplesRemaining -= (int)batchSize;
+				}
+			}
+
+			std::vector<TrainingDataBatch>& Batches()
+			{
+				return batches;
+			}
+
+			void ShuffleBatches()
+			{
+				std::shuffle(batches.begin(), batches.end(), gen);
+
+			}
+
+		private:
+			std::vector<TrainingDataBatch> batches;
+			std::mt19937 gen;
+	};
+
 	template <typename T>
 	class ModelTrainerT
 	{
@@ -170,20 +212,24 @@ namespace NeuralCpuTrain
 				if (receptiveField > batchSize)
 					throw std::runtime_error("Model receptive field exceeds batch size");
 
+				TrainingData trainingData(receptiveField, totalSamples - receptiveField, batchSize);
+
+				std::cout << "Training " << trainingData.Batches().size() << " batches of size " << (batchSize - receptiveField) << " (+" << receptiveField << ")" << std::endl;
+
 				for (int iter = 0; iter < 20000; ++iter)
 				{
-					size_t currentOffset = 0;
-					int samplesRemaining = (int)totalSamples;
+					trainingData.ShuffleBatches();
 
-					while (samplesRemaining > (int)receptiveField)
+					for (TrainingDataBatch& batch : trainingData.Batches())
 					{
-						size_t thisBatchSize = (size_t)std::min(samplesRemaining, (int)batchSize);
+						size_t thisBatchSize = batch.Size;
+						size_t thisBatchStart = batch.Offset - receptiveField;
 
 						float* batchInPtr = batchInput.GetData();
-						std::copy(input + currentOffset, input + currentOffset + thisBatchSize, batchInPtr);
+						std::copy(input + thisBatchStart, input + thisBatchStart + thisBatchSize, batchInPtr);
 
 						auto batchTargetPtr = batchTarget.GetData();
-						std::copy(target + currentOffset, target + currentOffset + thisBatchSize, batchTargetPtr);
+						std::copy(target + thisBatchStart, target + thisBatchStart + thisBatchSize, batchTargetPtr);
 
 						forwardOutput.SetZero();
 
@@ -196,9 +242,6 @@ namespace NeuralCpuTrain
 						modelBackprop.Backward(batchInput.Slice(thisBatchSize), outputGradient.Slice(thisBatchSize), layerOutputGradient.Slice(thisBatchSize));
 						
 						modelBackprop.ApplyGradients(learningRate);
-
-						currentOffset += validSampleCount;
-						samplesRemaining -= (int)validSampleCount;
 					}
 
 					double err = VerifyModel(verifyInput, verifyTarget, verifySamples);

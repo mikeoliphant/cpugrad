@@ -152,7 +152,7 @@ int main()
 	//denseTrainter->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
 	//Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
-	//auto convTrainer = new ModelTrainerT<float, BATCH_SIZE>(convBackprop);
+	//auto convTrainer = new ModelTrainerT<float>(convBackprop);
 
 	//convTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
@@ -167,10 +167,10 @@ int main()
 
 	auto convTestTrainer = new ModelTrainerT<float>(*convTest);
 
-	//auto data = convTestTrainer->GenerateSin(48000 * 10);
+	//auto data = convTestTrainer->GenerateSin(48000 * 180);
 	//convTestTrainer->TestIdentity(data);
 
-	//convTestTrainer->TestIdentity();
+	convTestTrainer->TestXOR(1);
 
 	convTestTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)"); //R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 
