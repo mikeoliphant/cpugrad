@@ -219,7 +219,7 @@ namespace NeuralCpuTrain
 
 				std::mt19937 gen(123);
 
-				std::uniform_real_distribution<float> dis(0.0f, 1.0f);
+				std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
 
 				for (size_t i = 0; i < numSamples; i++)
 					rand[i] = dis(gen);
@@ -250,6 +250,28 @@ namespace NeuralCpuTrain
 						target[i] = 0;
 					else
 						target[i] = rand[i - delay];
+				}
+
+				TrainModel(rand.data(), target.data(), totalSamples, rand.data(), target.data(), totalSamples);
+			}
+
+			void TestXOR(size_t delay)
+			{
+				const size_t totalSamples = 48000;// * 10;
+
+				auto rand = GenerateRandom(totalSamples);
+
+				for (int i = 0; i < totalSamples; i++)
+					rand[i] = std::copysign(1.0f, rand[i]);
+
+				std::vector<float> target(totalSamples);
+
+				for (size_t i = 0; i < totalSamples; i++)
+				{
+					if (i < delay)
+						target[i] = 0;
+					else
+						target[i] = -1 * rand[i] * rand[i - delay];
 				}
 
 				TrainModel(rand.data(), target.data(), totalSamples, rand.data(), target.data(), totalSamples);
