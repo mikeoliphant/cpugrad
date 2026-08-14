@@ -6,7 +6,7 @@
 #include <vector>
 #include <format>
 
-#define BATCH_SIZE 8192 // 131072
+#define MAX_BATCH_SIZE 131072
 
 using namespace NeuralAudio;
 
@@ -416,9 +416,6 @@ namespace NeuralCpuTrain
 				{
 					const auto offset = Dilation * ((int)k + 1 - KernelSize);
 
-					if (numFrames < -offset)
-						continue;
-
 					const size_t validSize = numFrames + offset;
 
 					const auto inBlock = input.Slice(0, validSize);
@@ -444,9 +441,6 @@ namespace NeuralCpuTrain
 				for (size_t k = 0; k < KernelSize; ++k)
 				{
 					const auto offset = Dilation * ((int)k + 1 - KernelSize);
-
-					if (numFrames < -offset)
-						continue;
 
 					const size_t validSize = numFrames + offset;
 

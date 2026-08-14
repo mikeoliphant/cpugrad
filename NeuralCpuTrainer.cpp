@@ -26,7 +26,7 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
-	auto modelTrainer = new ModelTrainerT<float, BATCH_SIZE>(*a2);
+	auto modelTrainer = new ModelTrainerT<float>(*a2);
 
 	auto input = modelTrainer->GenerateSin(numSamples);
 
@@ -132,15 +132,15 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 
 	private:
 		DenseBackpropT<T, InOutChannels, Channels, true> rechannel;
-		ChannelBuffer<T, Channels, BATCH_SIZE> rechannelOut;
+		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> rechannelOut;
 		Conv1DBackpropT<T, Channels, Channels, KernelSize, true, Dilation> conv;
-		ChannelBuffer<T, Channels, BATCH_SIZE> convOut;
-		ChannelBuffer<T, Channels, BATCH_SIZE> dConvOut;
+		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> convOut;
+		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dConvOut;
 		LeakyReLUT<T, Channels> relu;
-		ChannelBuffer<T, Channels, BATCH_SIZE> dReluOut;
-		ChannelBuffer<T, Channels, BATCH_SIZE> reluOut;
+		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dReluOut;
+		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> reluOut;
 		DenseBackpropT<T, Channels, InOutChannels, true> oneByOne;
-		ChannelBuffer<T, Channels, BATCH_SIZE> dOneByOneOut;
+		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dOneByOneOut;
 };
 
 int main()
@@ -149,9 +149,12 @@ int main()
 	//auto denseTrainter = new ModelTrainerT<float, BATCH_SIZE>(dense);
 
 	//denseTrainter->TestIdentity();
+	//denseTrainter->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
 	//Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
 	//auto convTrainer = new ModelTrainerT<float, BATCH_SIZE>(convBackprop);
+
+	//convTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
 	//convTrainer->TestXOR(1);
 
@@ -160,19 +163,24 @@ int main()
 
 	//TestNAM(R"(C:\Code\NeuralCpuTrainer\BossWN-a2lite.nam)");
 
-	ConvTestT<float, 1, 3, 3, 1> convTest;
+	auto convTest = new ConvTestT<float, 1, 3, 3, 1>();
 
-	auto convTestTrainer = new ModelTrainerT<float, BATCH_SIZE>(convTest);
+	auto convTestTrainer = new ModelTrainerT<float>(*convTest);
 
-	convTestTrainer->TestXOR(1);
+	//auto data = convTestTrainer->GenerateSin(48000 * 10);
+	//convTestTrainer->TestIdentity(data);
+
+	//convTestTrainer->TestIdentity();
+
+	convTestTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)"); //R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 
 	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
-	auto modelTrainer = new ModelTrainerT<float, BATCH_SIZE>(*a2);
+	auto modelTrainer = new ModelTrainerT<float>(*a2);
 
-	modelTrainer->TestDelay(0);
+	//modelTrainer->TestXOR(1);
 
-	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\TZ3-sweep-v3.wav)", R"(C:\Share\Recordings\NAM\BossSD1CaptureNeuralAudio.wav)");
+	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 
 	//ChainBackpropModelT<float, 1, 1> chainBackProp;
 

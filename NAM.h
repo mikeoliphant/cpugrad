@@ -112,15 +112,15 @@ public:
 
 private:
 	Conv1DBackpropT<T, Channels, Channels, KernelSize, true, Dilation> conv;
-	ChannelBuffer<T, Channels, BATCH_SIZE> convOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> convOut;
 	DenseBackpropT<T, ConditionSize, Channels, false> conditionMixIn;
-	ChannelBuffer<T, Channels, BATCH_SIZE> conditionMixInOut;
-	ChannelBuffer<T, ConditionSize, BATCH_SIZE> dConditionMixInOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> conditionMixInOut;
+	ChannelBuffer<T, ConditionSize, MAX_BATCH_SIZE> dConditionMixInOut;
 	LeakyReLUT<T, Channels> relu;
-	ChannelBuffer<T, Channels, BATCH_SIZE> reluOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> reluOut;
 	DenseBackpropT<T, Channels, Channels, true> oneByOne;
-	ChannelBuffer<T, Channels, BATCH_SIZE> dOneByOneOut;
-	ChannelBuffer<T, Channels, BATCH_SIZE> dReluOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dOneByOneOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dReluOut;
 };
 
 template <typename T, int InOutChannels, int Channels, typename KernelSizeSequence, typename DilationsSequence>
@@ -281,14 +281,14 @@ public:
 
 private:
 	DenseBackpropT<T, InOutChannels, Channels, false> layerArrayRechannel;
-	ChannelBuffer<T, Channels, BATCH_SIZE> layerArrayRechannelOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> layerArrayRechannelOut;
 
-	ChannelBuffer<T, Channels, BATCH_SIZE> layerOuts[NumLayers];
-	ChannelBuffer<T, Channels, BATCH_SIZE> dLayerOuts[NumLayers];
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> layerOuts[NumLayers];
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dLayerOuts[NumLayers];
 
-	ChannelBuffer<T, Channels, BATCH_SIZE> headOutput;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> headOutput;
 	Conv1DBackpropT<T, Channels, InOutChannels, 16, true, 1> headRechannel;
-	ChannelBuffer<T, Channels, BATCH_SIZE> dHeadRechannelOut;
+	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dHeadRechannelOut;
 	float headScale = 0.1f;
 };
 
