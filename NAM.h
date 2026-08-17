@@ -103,6 +103,13 @@ public:
 		dReluOut.SetZero();
 	}
 
+	void ResetGradients() override
+	{
+		conv.ResetGradients();
+		conditionMixIn.ResetGradients();
+		oneByOne.ResetGradients();
+	}
+
 	void ApplyGradients(float scale) override
 	{
 		conv.ApplyGradients(scale);
@@ -253,6 +260,17 @@ public:
 
 		headRechannel.Reset();
 		dHeadRechannelOut.SetZero();
+	}
+
+	void ResetGradients() override
+	{
+		layerArrayRechannel.ResetGradients();
+		ForEachIndex<NumLayers>([&](auto layerIndex)
+			{
+				std::get<layerIndex>(layers).ResetGradients();
+			});
+
+		headRechannel.ResetGradients();
 	}
 
 	void RandomizeWeights() override

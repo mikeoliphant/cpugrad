@@ -123,6 +123,14 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 			dOneByOneOut.SetZero();
 		}
 
+		void ResetGradients() override
+		{
+			rechannel.ResetGradients();
+			conv.ResetGradients();
+			oneByOne.ResetGradients();
+		}
+
+
 		void ApplyGradients(float scale) override
 		{
 			rechannel.ApplyGradients(scale);
@@ -146,9 +154,14 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 int main()
 {
 	//DenseBackpropT<float, 1, 1, false> dense;
-	//auto denseTrainter = new ModelTrainerT<float, BATCH_SIZE>(dense);
+	//auto denseTrainter = new ModelTrainerT<float>(dense);
 
 	//denseTrainter->TestIdentity();
+	
+	//auto denseData = denseTrainter->GenerateSin(48000 * 180);
+	//denseTrainter->TestIdentity(denseData);
+
+
 	//denseTrainter->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
 	//Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
@@ -167,10 +180,10 @@ int main()
 
 	auto convTestTrainer = new ModelTrainerT<float>(*convTest);
 
-	//auto data = convTestTrainer->GenerateSin(48000 * 180);
-	//convTestTrainer->TestIdentity(data);
+	auto data = convTestTrainer->GenerateSin(48000 * 180);
+	convTestTrainer->TestIdentity(data);
 
-	convTestTrainer->TestXOR(1);
+	//convTestTrainer->TestXOR(1);
 
 	convTestTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)"); //R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 

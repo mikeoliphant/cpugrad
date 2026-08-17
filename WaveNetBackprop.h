@@ -211,6 +211,9 @@ namespace NeuralCpuTrain
 			virtual void Reset()
 			{}
 
+			virtual void ResetGradients()
+			{}
+
 			virtual void ApplyGradients(float scale)
 			{}
 
@@ -368,7 +371,7 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void Reset() override
+			void ResetGradients() override
 			{
 				dWeights.GetDWeights().SetZero();
 
@@ -400,12 +403,9 @@ namespace NeuralCpuTrain
 	{
 		public:
 			Conv1DBackpropT() :
+				dWeights(weights),
 				dBias(bias)
 			{
-				for (int k = 0; k < KernelSize; k++)
-				{
-					dWeights[k].SetWeights(weights[k]);
-				}
 			}
 
 			void Forward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& output) override
@@ -421,7 +421,7 @@ namespace NeuralCpuTrain
 					const auto inBlock = input.Slice(0, validSize);
 					const auto outBlock = output.Slice(-offset, validSize);
 
-					outBlock.GetEigenMap().noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
+					outBlock.GetEigenMap().noalias() += weights.Slice(InChannels * k, InChannels).GetEigenMapConst() * inBlock.GetEigenMapConst();
 				}
 
 				if constexpr (DoBias)
@@ -447,10 +447,10 @@ namespace NeuralCpuTrain
 					const auto inBlock = input.Slice(0, validSize);
 					const auto dOutputBlock = dOutput.Slice(-offset, validSize);
 			
-					auto dwMap = dWeights[k].GetDWeights().GetEigenMap();
+					auto dwMap = dWeights.GetDWeights().Slice(InChannels * k, InChannels).GetEigenMap();
 					dwMap.noalias() += dOutputBlock.GetEigenMapConst() * inBlock.GetEigenMapConst().transpose();
 
-					auto wMap = weights[k].GetEigenMapConst();
+					auto wMap = weights.Slice(InChannels * k, InChannels).GetEigenMapConst();
 					auto dInputMap = dInput.Slice(-offset, validSize).GetEigenMap();
 					dInputMap.noalias() += wMap.transpose() * dOutputBlock.GetEigenMapConst();
 				}
@@ -486,7 +486,7 @@ namespace NeuralCpuTrain
 				for (size_t i = 0; i < OutChannels; i++)
 					for (size_t j = 0; j < InChannels; j++)
 						for (size_t k = 0; k < KernelSize; k++)
-							weights[k](i, j) = *(inWeights++);
+							weights(i, (k * InChannels) + j) = *(inWeights++);
 
 				if constexpr (DoBias)
 				{
@@ -495,11 +495,11 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void Reset() override
+			void ResetGradients() override
 			{
 				for (int k = 0; k < KernelSize; k++)
 				{
-					dWeights[k].GetDWeights().SetZero();
+					dWeights.GetDWeights().SetZero();
 				}
 
 				if constexpr (DoBias)
@@ -510,10 +510,7 @@ namespace NeuralCpuTrain
 
 			void ApplyGradients(float scale) override
 			{
-				for (int k = 0; k < KernelSize; k++)
-				{
-					dWeights[k].ApplyGradients(scale);
-				}
+				dWeights.ApplyGradients(scale);
 
 				if constexpr (DoBias)
 				{
@@ -522,9 +519,9 @@ namespace NeuralCpuTrain
 			}
 
 		private:
-			alignas(32) std::array<ChannelBuffer<T, OutChannels, InChannels>, KernelSize> weights;
+			ChannelBuffer<T, OutChannels, InChannels * KernelSize> weights;
 			Eigen::Vector<T, OutChannels> bias;
-			alignas(32) std::array<ChannelBufferWeightGradT<T, ChannelBuffer<T, OutChannels, InChannels>, OutChannels * InChannels>, KernelSize> dWeights;
+			ChannelBufferWeightGradT<T, ChannelBuffer<T, OutChannels, InChannels * KernelSize>, OutChannels * InChannels * KernelSize> dWeights;
 			EigenWeightGradT<T, Eigen::Vector<T, OutChannels>, OutChannels> dBias;
 	};
 

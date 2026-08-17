@@ -14,7 +14,7 @@ namespace NeuralCpuTrain
 		public:
 			virtual ~LossT() = default;
 			virtual std::string& GetName() { return name; }
-			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, size_t receptiveFieldSize) = 0;
+			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, T scaleFactor) = 0;
 			virtual double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) = 0;
 
 		protected:
@@ -30,14 +30,14 @@ namespace NeuralCpuTrain
 				this->name = "MSE";
 			}
 
-			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize) override
+			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, T scaleFactor) override
 			{
 				for (size_t t = 0; t < numSamples; t++)
 				{
 					if (t < receptiveFieldSize)
 						outGradient[t] = 0;
 					else
-						outGradient[t] = (TCONST(2) * (output[t] - target[t])) / static_cast<T>(numSamples - receptiveFieldSize);
+						outGradient[t] = ((TCONST(2) * (output[t] - target[t])) / static_cast<T>(numSamples - receptiveFieldSize)) * scaleFactor;
 				}
 			}
 
@@ -66,7 +66,7 @@ namespace NeuralCpuTrain
 			this->name = "ESR";
 		}
 
-		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize) override
+		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, T scaleFactor) override
 		{
 			double totEnergy = 0;
 
@@ -82,7 +82,7 @@ namespace NeuralCpuTrain
 				if (t < receptiveFieldSize)
 					outGradient[t] = 0;
 				else
-					outGradient[t] = (TCONST(2) * (output[t] - target[t])) / static_cast<T>(totEnergy);
+					outGradient[t] = ((TCONST(2) * (output[t] - target[t])) / static_cast<T>(totEnergy)) * scaleFactor;
 			}
 		}
 
@@ -214,11 +214,19 @@ namespace NeuralCpuTrain
 
 				TrainingData trainingData(receptiveField, totalSamples - receptiveField, batchSize);
 
+				size_t numBatches = 16;
+
 				std::cout << "Training " << trainingData.Batches().size() << " batches of size " << (batchSize - receptiveField) << " (+" << receptiveField << ")" << std::endl;
 
 				for (int iter = 0; iter < 20000; ++iter)
 				{
 					trainingData.ShuffleBatches();
+
+					modelBackprop.ResetGradients();
+
+					size_t currentBatchNum = 0;
+					size_t startBatchNum = 0;
+					size_t totBatches = trainingData.Batches().size();
 
 					for (TrainingDataBatch& batch : trainingData.Batches())
 					{
@@ -237,11 +245,23 @@ namespace NeuralCpuTrain
 
 						modelBackprop.Forward(batchInput.Slice(thisBatchSize), forwardOutput.Slice(thisBatchSize));
 
-						lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), thisBatchSize, receptiveField);
+						size_t endBatch = std::min(startBatchNum + numBatches, totBatches - 1);
+
+						float lossScale = 1.0f / (float)(endBatch - startBatchNum);
+
+						lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), thisBatchSize, receptiveField, lossScale);
 
 						modelBackprop.Backward(batchInput.Slice(thisBatchSize), outputGradient.Slice(thisBatchSize), layerOutputGradient.Slice(thisBatchSize));
-						
-						modelBackprop.ApplyGradients(learningRate);
+
+						currentBatchNum++;
+
+						if (((currentBatchNum  % 16) == 0) || (currentBatchNum == (totBatches - 1)))
+						{
+							modelBackprop.ApplyGradients(learningRate);
+							modelBackprop.ResetGradients();
+
+							startBatchNum = currentBatchNum - 1;
+						}
 					}
 
 					double err = VerifyModel(verifyInput, verifyTarget, verifySamples);
@@ -254,8 +274,10 @@ namespace NeuralCpuTrain
 			{
 				std::vector<float> data(numSamples);
 
+				size_t sweep = 8192;
+
 				for (size_t i = 0; i < numSamples; i++)
-					data[i] = (float)std::sin(i * 0.01);
+					data[i] = (float)std::sin(i * 0.01) * ((float)(i % sweep) / (float)sweep);
 
 				return data;
 			}
