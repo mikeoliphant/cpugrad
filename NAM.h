@@ -75,12 +75,7 @@ public:
 	void RandomizeWeights() override
 	{
 		conv.RandomizeWeights();
-
-		// zero out oneByOne weights
-		std::vector<float> zeros(oneByOne.GetNumWeights());
-		auto it = zeros.begin();
-		oneByOne.SetWeights(it);
-
+		oneByOne.RandomizeWeights();
 		conditionMixIn.RandomizeWeights();
 	}
 
@@ -97,10 +92,11 @@ public:
 		convOut.SetZero();
 		conditionMixIn.Reset();
 		conditionMixInOut.SetZero();
+		dConditionMixInOut.SetZero();
 		reluOut.SetZero();
+		dReluOut.SetZero();
 		oneByOne.Reset();
 		dOneByOneOut.SetZero();
-		dReluOut.SetZero();
 	}
 
 	void ResetGradients() override
@@ -258,6 +254,7 @@ public:
 				dLayerOuts[layerIndex].SetZero();
 			});
 
+		headOutput.SetZero();
 		headRechannel.Reset();
 		dHeadRechannelOut.SetZero();
 	}

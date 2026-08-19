@@ -15,94 +15,94 @@ namespace NeuralCpuTrain
 	template <typename T, typename WeightType, int NumWeights>
 	class WeightGradT
 	{
-		public:
-			WeightGradT() :
-				weightPtr(nullptr),
-				t(0)
+	public:
+		WeightGradT() :
+			weightPtr(nullptr),
+			t(0)
+		{
+			std::fill(m, m + NumWeights, T(0));
+			std::fill(v, v + NumWeights, T(0));
+		}
+
+		WeightGradT(WeightType& weights) :
+			weightPtr(&weights),
+			t(0)
+		{
+			std::fill(m, m + NumWeights, T(0));
+			std::fill(v, v + NumWeights, T(0));
+		}
+
+		~WeightGradT() = default;
+
+		void SetWeights(WeightType& weights)
+		{
+			weightPtr = &weights;
+		}
+
+		WeightType& GetDWeights()
+		{
+			return dWeights;
+		}
+
+		virtual T* GetData(WeightType& w) = 0;
+		virtual const T* GetDataConst(WeightType& w) const = 0;
+
+		void ApplyGradients(float learningRate,
+			float maxNorm = 1.0f,
+			float weightDecay = 0.01f,
+			float beta1 = 0.9f,
+			float beta2 = 0.999f,
+			float epsilon = 1e-8f)
+		{
+			if (!weightPtr) return;
+
+			T* wp = GetData(*weightPtr);
+			const T* dwp = GetDataConst(dWeights);
+
+			// 1. Calculate the L2 Norm (Euclidean length) of the entire gradient block
+			double totalSumSq = 0.0;
+			for (size_t w = 0; w < NumWeights; w++)
 			{
-				std::fill(m, m + NumWeights, T(0));
-				std::fill(v, v + NumWeights, T(0));
+				totalSumSq += static_cast<double>(dwp[w] * dwp[w]);
+			}
+			float gradNorm = std::sqrt(static_cast<float>(totalSumSq));
+
+			// 2. Determine scaling factor if norm exceeds our max allowed threshold
+			float scaleFactor = 1.0f;
+			if (gradNorm > maxNorm && gradNorm > 0.0f)
+			{
+				scaleFactor = maxNorm / gradNorm;
 			}
 
-			WeightGradT(WeightType& weights) :
-				weightPtr(&weights),
-				t(0)
+			t++;
+			const float biasCorrection1 = 1.0f - (float)std::pow(beta1, t);
+			const float biasCorrection2 = 1.0f - (float)std::pow(beta2, t);
+
+			for (size_t w = 0; w < NumWeights; w++)
 			{
-				std::fill(m, m + NumWeights, T(0));
-				std::fill(v, v + NumWeights, T(0));
+				// Apply scaling factor to the gradient uniformly
+				float clipped_dw = dwp[w] * scaleFactor;
+
+				// AdamW Parameter Updates
+				wp[w] -= learningRate * weightDecay * wp[w];
+
+				m[w] = beta1 * m[w] + (1.0f - beta1) * clipped_dw;
+				v[w] = beta2 * v[w] + (1.0f - beta2) * (clipped_dw * clipped_dw);
+
+				float m_hat = m[w] / biasCorrection1;
+				float v_hat = v[w] / biasCorrection2;
+
+				wp[w] -= (learningRate * m_hat) / ((float)std::sqrt(v_hat + epsilon));
 			}
+		}
 
-			~WeightGradT() = default;
+	protected:
+		WeightType* weightPtr;
+		WeightType dWeights;
 
-			void SetWeights(WeightType& weights)
-			{
-				weightPtr = &weights;
-			}
-
-			WeightType& GetDWeights()
-			{
-				return dWeights;
-			}
-
-			virtual T* GetData(WeightType& w) = 0;
-			virtual const T* GetDataConst(WeightType& w) const = 0;
-
-			void ApplyGradients(float learningRate,
-				float maxNorm = 1.0f,
-				float weightDecay = 0.01f,
-				float beta1 = 0.9f,
-				float beta2 = 0.999f,
-				float epsilon = 1e-8f)
-			{
-				if (!weightPtr) return;
-
-				T* wp = GetData(*weightPtr);
-				const T* dwp = GetDataConst(dWeights);
-
-				// 1. Calculate the L2 Norm (Euclidean length) of the entire gradient block
-				double totalSumSq = 0.0;
-				for (size_t w = 0; w < NumWeights; w++)
-				{
-					totalSumSq += static_cast<double>(dwp[w] * dwp[w]);
-				}
-				float gradNorm = std::sqrt(static_cast<float>(totalSumSq));
-
-				// 2. Determine scaling factor if norm exceeds our max allowed threshold
-				float scaleFactor = 1.0f;
-				if (gradNorm > maxNorm && gradNorm > 0.0f)
-				{
-					scaleFactor = maxNorm / gradNorm;
-				}
-
-				t++;
-				const float biasCorrection1 = 1.0f - (float)std::pow(beta1, t);
-				const float biasCorrection2 = 1.0f - (float)std::pow(beta2, t);
-
-				for (size_t w = 0; w < NumWeights; w++)
-				{
-					// Apply scaling factor to the gradient uniformly
-					float clipped_dw = dwp[w] * scaleFactor;
-
-					// AdamW Parameter Updates
-					wp[w] -= learningRate * weightDecay * wp[w];
-
-					m[w] = beta1 * m[w] + (1.0f - beta1) * clipped_dw;
-					v[w] = beta2 * v[w] + (1.0f - beta2) * (clipped_dw * clipped_dw);
-
-					float m_hat = m[w] / biasCorrection1;
-					float v_hat = v[w] / biasCorrection2;
-
-					wp[w] -= (learningRate * m_hat) / ((float)std::sqrt(v_hat + epsilon));
-				}
-			}
-
-		protected:
-			WeightType* weightPtr;
-			WeightType dWeights;
-
-			T m[NumWeights]; // First moment vector (moving average of gradients)
-			T v[NumWeights]; // Second moment vector (moving average of squared gradients)
-			int t;           // Timestep counter
+		T m[NumWeights]; // First moment vector (moving average of gradients)
+		T v[NumWeights]; // Second moment vector (moving average of squared gradients)
+		int t;           // Timestep counter
 	};
 
 	template <typename T, typename WeightType, int NumWeights>
@@ -143,7 +143,10 @@ namespace NeuralCpuTrain
 	class BackpropModelBaseT
 	{
 		static std::mt19937& getRand() {
-			static std::mt19937 engine(123);
+			//static std::mt19937 engine(123);
+			static std::random_device rd;
+			static std::mt19937 engine(rd());
+
 			return engine;
 		}
 
@@ -188,8 +191,11 @@ namespace NeuralCpuTrain
 
 			void RandomizeWeights(size_t numFeatures)
 			{
-				double stddev = std::sqrt(2.0 / (double)numFeatures);
-				std::normal_distribution<double> dist(0.0, stddev);
+				//double stddev = std::sqrt(2.0 / (double)numFeatures);
+				//std::normal_distribution<double> dist(0.0, stddev);
+
+				double bound = 1.0 / std::sqrt((double)numFeatures);
+				std::uniform_real_distribution<double> dist(-bound, bound);
 
 				size_t numWeights = GetNumWeights();
 
@@ -352,10 +358,10 @@ namespace NeuralCpuTrain
 			{
 				BackpropModelT<T, InSize, OutSize>::RandomizeWeights();
 
-				if constexpr (DoBias)
-				{
-					bias.setZero();
-				}
+				//if constexpr (DoBias)
+				//{
+				//	bias.setZero();
+				//}
 			}
 
 			void SetWeights(std::vector<float>::iterator& inWeights) override
@@ -403,9 +409,12 @@ namespace NeuralCpuTrain
 	{
 		public:
 			Conv1DBackpropT() :
-				dWeights(weights),
 				dBias(bias)
 			{
+				for (int k = 0; k < KernelSize; k++)
+				{
+					dWeights[k].SetWeights(weights[k]);
+				}
 			}
 
 			void Forward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& output) override
@@ -421,7 +430,7 @@ namespace NeuralCpuTrain
 					const auto inBlock = input.Slice(0, validSize);
 					const auto outBlock = output.Slice(-offset, validSize);
 
-					outBlock.GetEigenMap().noalias() += weights.Slice(InChannels * k, InChannels).GetEigenMapConst() * inBlock.GetEigenMapConst();
+					outBlock.GetEigenMap().noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
 				}
 
 				if constexpr (DoBias)
@@ -447,10 +456,10 @@ namespace NeuralCpuTrain
 					const auto inBlock = input.Slice(0, validSize);
 					const auto dOutputBlock = dOutput.Slice(-offset, validSize);
 			
-					auto dwMap = dWeights.GetDWeights().Slice(InChannels * k, InChannels).GetEigenMap();
+					auto dwMap = dWeights[k].GetDWeights().GetEigenMap();
 					dwMap.noalias() += dOutputBlock.GetEigenMapConst() * inBlock.GetEigenMapConst().transpose();
 
-					auto wMap = weights.Slice(InChannels * k, InChannels).GetEigenMapConst();
+					auto wMap = weights[k].GetEigenMapConst();
 					auto dInputMap = dInput.Slice(-offset, validSize).GetEigenMap();
 					dInputMap.noalias() += wMap.transpose() * dOutputBlock.GetEigenMapConst();
 				}
@@ -475,10 +484,10 @@ namespace NeuralCpuTrain
 			{
 				BackpropModelT<T, InChannels, OutChannels>::RandomizeWeights();
 
-				if constexpr (DoBias)
-				{
-					bias.setZero();
-				}
+				//if constexpr (DoBias)
+				//{
+				//	bias.setZero();
+				//}
 			}
 
 			void SetWeights(std::vector<float>::iterator& inWeights) override
@@ -486,7 +495,7 @@ namespace NeuralCpuTrain
 				for (size_t i = 0; i < OutChannels; i++)
 					for (size_t j = 0; j < InChannels; j++)
 						for (size_t k = 0; k < KernelSize; k++)
-							weights(i, (k * InChannels) + j) = *(inWeights++);
+							weights[k](i, j) = *(inWeights++);
 
 				if constexpr (DoBias)
 				{
@@ -495,11 +504,11 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void ResetGradients() override
+			void Reset() override
 			{
 				for (int k = 0; k < KernelSize; k++)
 				{
-					dWeights.GetDWeights().SetZero();
+					dWeights[k].GetDWeights().SetZero();
 				}
 
 				if constexpr (DoBias)
@@ -510,7 +519,10 @@ namespace NeuralCpuTrain
 
 			void ApplyGradients(float scale) override
 			{
-				dWeights.ApplyGradients(scale);
+				for (int k = 0; k < KernelSize; k++)
+				{
+					dWeights[k].ApplyGradients(scale);
+				}
 
 				if constexpr (DoBias)
 				{
@@ -519,9 +531,9 @@ namespace NeuralCpuTrain
 			}
 
 		private:
-			ChannelBuffer<T, OutChannels, InChannels * KernelSize> weights;
+			alignas(32) std::array<ChannelBuffer<T, OutChannels, InChannels>, KernelSize> weights;
 			Eigen::Vector<T, OutChannels> bias;
-			ChannelBufferWeightGradT<T, ChannelBuffer<T, OutChannels, InChannels * KernelSize>, OutChannels * InChannels * KernelSize> dWeights;
+			alignas(32) std::array<ChannelBufferWeightGradT<T, ChannelBuffer<T, OutChannels, InChannels>, OutChannels * InChannels>, KernelSize> dWeights;
 			EigenWeightGradT<T, Eigen::Vector<T, OutChannels>, OutChannels> dBias;
 	};
 

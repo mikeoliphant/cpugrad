@@ -121,7 +121,7 @@ namespace NeuralCpuTrain
 	class TrainingData
 	{
 		public:
-			TrainingData(size_t trainingOffset, size_t trainingSamples, size_t batchSize) :
+			TrainingData(size_t trainingOffset, size_t trainingSamples, size_t batchSize, size_t batchSkip) :
 				gen(123)
 			{
 				batches.reserve((trainingSamples / batchSize) + 1);
@@ -133,8 +133,8 @@ namespace NeuralCpuTrain
 				{
 					batches.emplace_back(currentOffset, std::min((size_t)samplesRemaining, batchSize) );
 
-					currentOffset += batchSize;
-					samplesRemaining -= (int)batchSize;
+					currentOffset += batchSkip;
+					samplesRemaining -= (int)batchSkip;
 				}
 			}
 
@@ -160,30 +160,29 @@ namespace NeuralCpuTrain
 		public:
 			ModelTrainerT(BackpropModelT<T, 1, 1>& modelBackprop) :
 				modelBackprop(modelBackprop),
-				lossFunction(std::make_unique<ESRLossT<T>>())
+				lossFunction(std::make_unique<MSELossT<T>>()),
+				lossEvalFunction(std::make_unique<MSELossT<T>>())
 			{
-				batchSize = modelBackprop.GetReceptiveField() + 8192;
 			}
 
-			double VerifyModel(const T* input, const T* target, const size_t totalSamples)
+			void VerifyModel(const T* input, T* output, const size_t totalSamples)
 			{
 				size_t receptiveField = modelBackprop.GetReceptiveField();
+				//size_t batchSize = receptiveField + 8192;
+				size_t batchSize = MAX_BATCH_SIZE;
 				size_t validSampleCount = batchSize - receptiveField;
 
-				size_t currentOffset = 0;
+				size_t currentOffset = 0;	// ** NOTE - we will have invalid data for the initial receptive field
 				int samplesRemaining = (int)totalSamples;
 
-				double totErr = 0.0;
+				std::vector<float> verifyOutput(totalSamples);
 
 				while (samplesRemaining > 0)
-				{
+				{					
 					size_t thisBatchSize = (size_t)std::min(samplesRemaining, (int)batchSize);
 
 					T* batchInPtr = batchInput.GetData();
 					std::copy(input + currentOffset, input + currentOffset + thisBatchSize, batchInPtr);
-
-					auto batchTargetPtr = batchTarget.GetData();
-					std::copy(target + currentOffset, target + currentOffset + thisBatchSize, batchTargetPtr);
 
 					forwardOutput.SetZero();
 
@@ -191,32 +190,37 @@ namespace NeuralCpuTrain
 
 					modelBackprop.Forward(batchInput.Slice(thisBatchSize), forwardOutput.Slice(thisBatchSize));
 
-					totErr += lossFunction->GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), thisBatchSize, receptiveField);
+					T* forwardOutputPtr = forwardOutput.GetData();
+					std::copy(forwardOutputPtr + receptiveField, forwardOutputPtr + thisBatchSize, output + currentOffset + receptiveField);
 
 					currentOffset += validSampleCount;
 					samplesRemaining -= (int)validSampleCount;
 				}
-
-				return (totErr / static_cast<float>(totalSamples));
 			}
 
-			void TrainModel(const float* input, const float* target, const size_t totalSamples, const float* verifyInput, const float* verifyTarget, const size_t verifySamples)
+			void TrainModel(const T* input, T* target, const size_t totalSamples, const T* verifyInput, const T* verifyTarget, const size_t verifySamples)
 			{
 				float learningRate = 0.005f;
+
+				//ApplyHPF(target, totalSamples);
 
 				modelBackprop.RandomizeWeights();
 
 				size_t receptiveField = modelBackprop.GetReceptiveField();
+				size_t batchSize = receptiveField + 8192;
 				size_t validSampleCount = batchSize - receptiveField;
+
 
 				if (receptiveField > batchSize)
 					throw std::runtime_error("Model receptive field exceeds batch size");
 
-				TrainingData trainingData(receptiveField, totalSamples - receptiveField, batchSize);
+				TrainingData trainingData(receptiveField, totalSamples, batchSize, batchSize - receptiveField);
 
 				size_t numBatches = 16;
 
 				std::cout << "Training " << trainingData.Batches().size() << " batches of size " << (batchSize - receptiveField) << " (+" << receptiveField << ")" << std::endl;
+
+				std::vector<T> verifyOutput(verifySamples);
 
 				for (int iter = 0; iter < 20000; ++iter)
 				{
@@ -249,13 +253,17 @@ namespace NeuralCpuTrain
 
 						float lossScale = 1.0f / (float)(endBatch - startBatchNum);
 
+						//ApplyHPF(forwardOutput.GetData() + receptiveField, thisBatchSize - receptiveField);
+
 						lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), thisBatchSize, receptiveField, lossScale);
+
+						//std::cout << "Batch loss: " << lossFunction->GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), thisBatchSize, receptiveField) / (float)validSampleCount << std::endl;
 
 						modelBackprop.Backward(batchInput.Slice(thisBatchSize), outputGradient.Slice(thisBatchSize), layerOutputGradient.Slice(thisBatchSize));
 
 						currentBatchNum++;
 
-						if (((currentBatchNum  % 16) == 0) || (currentBatchNum == (totBatches - 1)))
+						if (((currentBatchNum  % numBatches) == 0) || (currentBatchNum == (totBatches - 1)))
 						{
 							modelBackprop.ApplyGradients(learningRate);
 							modelBackprop.ResetGradients();
@@ -264,17 +272,31 @@ namespace NeuralCpuTrain
 						}
 					}
 
-					double err = VerifyModel(verifyInput, verifyTarget, verifySamples);
+					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
 
-					std::cout << "Iter: " << iter << " " << lossFunction->GetName() << ": " << err << std::endl;
+					double err = lossEvalFunction->GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
+
+					std::cout << "Epoch: " << iter << " " << lossEvalFunction->GetName() << ": " << std::format("{:.10f}", err) << std::endl;
 				}
+			}
+
+			void ApplyHPF(T* data, size_t numSamples)
+			{
+				constexpr T coefficient = T(0.95);
+
+				for (size_t n = numSamples - 1; n > 0; --n)
+				{
+					data[n] = data[n] - (coefficient * data[n - 1]);
+				}
+
+				data[0] = data[0] * (1.0f - coefficient);
 			}
 
 			std::vector<float> GenerateSin(size_t numSamples)
 			{
 				std::vector<float> data(numSamples);
 
-				size_t sweep = 8192;
+				size_t sweep = numSamples; // 8192;
 
 				for (size_t i = 0; i < numSamples; i++)
 					data[i] = (float)std::sin(i * 0.01) * ((float)(i % sweep) / (float)sweep);
@@ -286,7 +308,9 @@ namespace NeuralCpuTrain
 			{
 				std::vector<float> rand(numSamples);
 
-				std::mt19937 gen(123);
+				//std::mt19937 gen(123);
+				std::random_device rd;
+				std::mt19937 gen(rd());
 
 				std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
 
@@ -365,17 +389,19 @@ namespace NeuralCpuTrain
 				size_t verifyFrames = 48000 * 9;
 				size_t verifyOffset = (size_t)numFrames - verifyFrames;
 
-				TrainModel(inData + startOffset, targetData + startOffset, (size_t)numFrames - verifyFrames - startOffset, inData + verifyOffset, targetData + verifyOffset, verifyFrames);
+				size_t frameDelay = 4;
+
+				TrainModel(inData + startOffset - frameDelay, targetData + startOffset, (size_t)numFrames - verifyFrames - startOffset - frameDelay, inData + verifyOffset - frameDelay, targetData + verifyOffset, verifyFrames - frameDelay);
 			}
 
 		private:
 			BackpropModelT<float, 1, 1>& modelBackprop;
-			size_t batchSize;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchInput;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchTarget;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> forwardOutput;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> outputGradient;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
 			std::unique_ptr<LossT<T>> lossFunction;
+			std::unique_ptr<LossT<T>> lossEvalFunction;
 	};
 }
