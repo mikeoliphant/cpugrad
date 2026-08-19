@@ -292,87 +292,11 @@ namespace NeuralCpuTrain
 				data[0] = data[0] * (1.0f - coefficient);
 			}
 
-			std::vector<float> GenerateSin(size_t numSamples)
+			void TrainIdentity(std::vector<float>& data)
 			{
-				std::vector<float> data(numSamples);
+				size_t verifySamples = (size_t)(data.size() * .1f);
 
-				size_t sweep = numSamples; // 8192;
-
-				for (size_t i = 0; i < numSamples; i++)
-					data[i] = (float)std::sin(i * 0.01) * ((float)(i % sweep) / (float)sweep);
-
-				return data;
-			}
-
-			std::vector<float> GenerateRandom(size_t numSamples)
-			{
-				std::vector<float> rand(numSamples);
-
-				//std::mt19937 gen(123);
-				std::random_device rd;
-				std::mt19937 gen(rd());
-
-				std::uniform_real_distribution<float> dis(-1.0f, 1.0f);
-
-				for (size_t i = 0; i < numSamples; i++)
-					rand[i] = dis(gen);
-
-				return rand;
-			}
-
-			void TestIdentity()
-			{
-				const size_t totalSamples = 48000 * 10;
-
-				auto rand = GenerateRandom(totalSamples);
-
-				TestIdentity(rand);
-			}
-
-			void TestIdentity(std::vector<float>& data)
-			{
-				TrainModel(data.data(), data.data(), data.size(), data.data(), data.data(), data.size());
-			}
-
-			void TestDelay(size_t delay)
-			{
-				const size_t totalSamples = 48000 * 10;
-
-				auto rand = GenerateRandom(totalSamples);
-
-				std::vector<float> target(totalSamples);
-
-				for (size_t i = 0; i < totalSamples; i++)
-				{
-					if (i < delay)
-						target[i] = 0;
-					else
-						target[i] = rand[i - delay];
-				}
-
-				TrainModel(rand.data(), target.data(), totalSamples, rand.data(), target.data(), totalSamples);
-			}
-
-			void TestXOR(size_t delay)
-			{
-				const size_t totalSamples = 48000 * 10;
-
-				auto rand = GenerateRandom(totalSamples);
-
-				for (int i = 0; i < totalSamples; i++)
-					rand[i] = std::copysign(1.0f, rand[i]);
-
-				std::vector<float> target(totalSamples);
-
-				for (size_t i = 0; i < totalSamples; i++)
-				{
-					if (i < delay)
-						target[i] = 0;
-					else
-						target[i] = -1 * rand[i] * rand[i - delay];
-				}
-
-				TrainModel(rand.data(), target.data(), totalSamples, rand.data(), target.data(), totalSamples);
+				TrainModel(data.data(), data.data(), data.size() - verifySamples, data.data() + verifySamples, data.data() + verifySamples, verifySamples);
 			}
 
 			void TestWav(const std::filesystem::path inWavePath, const std::filesystem::path targetWavePath)

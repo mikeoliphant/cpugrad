@@ -10,6 +10,7 @@ set(SOURCES
 	NeuralCpuTrainer.cpp
 	ModelTrainer.h
 	WaveNetBackprop.h
+	Dataset.h
 	NAM.h)
 
 add_executable(NeuralCpuTrainer ${SOURCES})

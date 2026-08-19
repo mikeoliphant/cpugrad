@@ -12,6 +12,7 @@
 #include "WaveNetBackprop.h"
 #include "ModelTrainer.h"
 #include "NAM.h"
+#include "Dataset.h"
 
 using namespace NeuralAudio;
 using namespace NeuralCpuTrain;
@@ -28,7 +29,9 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	auto modelTrainer = new ModelTrainerT<float>(*a2);
 
-	auto input = modelTrainer->GenerateSin(numSamples);
+	DataGen dataGen;
+
+	auto input = dataGen.GenerateSin(numSamples);
 
 	std::vector<float> namOutput(numSamples);
 
@@ -157,6 +160,15 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 
 int main()
 {
+	DataGen dataGen;
+
+	size_t numSamples = 48000 * 180;
+
+	auto rand = dataGen.GenerateRandom(numSamples);
+	auto sin = dataGen.GenerateSin(numSamples);
+	auto delay = dataGen.GenerateDelay(1, numSamples);
+	auto tempXor = dataGen.GenerateXOR(1, numSamples);
+
 	//TestNAM(R"(C:\Code\NeuralCpuTrainer\BossWN-a2lite.nam)");
 
 
@@ -181,12 +193,11 @@ int main()
 	//WaveNetLayerBackpropT<float, 1, 3, 1> wn;
 	//TestModel(wn);
 
-	//auto convTest = new ConvTestT<float, 1, 3, 6, 1, 16>();
+	auto convTest = new ConvTestT<float, 1, 3, 3, 1, 1>();
 
-	//auto convTestTrainer = new ModelTrainerT<float>(*convTest);
+	auto convTestTrainer = new ModelTrainerT<float>(*convTest);
 
-	//auto data = convTestTrainer->GenerateSin(48000 * 180);
-	//convTestTrainer->TestIdentity(data);
+	convTestTrainer->TrainIdentity(rand);
 
 	//convTestTrainer->TestXOR(1);
 	//convTestTrainer->TestIdentity();
@@ -203,10 +214,7 @@ int main()
 
 	auto modelTrainer = new ModelTrainerT<float>(*a2);
 
-	auto a2data = modelTrainer->GenerateSin(48000 * 180);
-	modelTrainer->TestIdentity(a2data);
-
-	modelTrainer->TestIdentity();
+	modelTrainer->TrainIdentity(rand);
 
 	//modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 
