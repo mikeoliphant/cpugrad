@@ -28,14 +28,12 @@ class DataGen
 			return rand;
 		}
 
-		std::vector<float> GenerateSin(size_t numSamples)
+		std::vector<float> GenerateSin(size_t numSamples, size_t sweepSamples)
 		{
 			std::vector<float> data(numSamples);
 
-			size_t sweep = numSamples; // 8192;
-
 			for (size_t i = 0; i < numSamples; i++)
-				data[i] = (float)std::sin(i * 0.01) * ((float)(i % sweep) / (float)sweep);
+				data[i] = (float)std::sin(i * 0.01) * ((float)(i % sweepSamples) / (float)sweepSamples);
 
 			return data;
 		}
@@ -61,7 +59,7 @@ class DataGen
 		{
 			auto rand = GenerateRandom(numSamples);
 
-			for (int i = 0; i < numSamples; i++)
+			for (size_t i = 0; i < numSamples; i++)
 				rand[i] = std::copysign(1.0f, rand[i]);
 
 			std::vector<float> target(numSamples);

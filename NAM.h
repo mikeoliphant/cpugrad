@@ -99,18 +99,11 @@ public:
 		dOneByOneOut.SetZero();
 	}
 
-	void ResetGradients() override
+	void AddWeightGradients(OptimizerT<T>& optimizer) override
 	{
-		conv.ResetGradients();
-		conditionMixIn.ResetGradients();
-		oneByOne.ResetGradients();
-	}
-
-	void ApplyGradients(float scale) override
-	{
-		conv.ApplyGradients(scale);
-		conditionMixIn.ApplyGradients(scale);
-		oneByOne.ApplyGradients(scale);
+		conv.AddWeightGradients(optimizer);
+		conditionMixIn.AddWeightGradients(optimizer);
+		oneByOne.AddWeightGradients(optimizer);
 	}
 
 private:
@@ -259,15 +252,15 @@ public:
 		dHeadRechannelOut.SetZero();
 	}
 
-	void ResetGradients() override
+	void AddWeightGradients(OptimizerT<T>& optimizer) override
 	{
-		layerArrayRechannel.ResetGradients();
+		layerArrayRechannel.AddWeightGradients(optimizer);
 		ForEachIndex<NumLayers>([&](auto layerIndex)
 			{
-				std::get<layerIndex>(layers).ResetGradients();
+				std::get<layerIndex>(layers).AddWeightGradients(optimizer);
 			});
 
-		headRechannel.ResetGradients();
+		headRechannel.AddWeightGradients(optimizer);
 	}
 
 	void RandomizeWeights() override
@@ -280,18 +273,6 @@ public:
 			});
 
 		headRechannel.RandomizeWeights();
-	}
-
-	void ApplyGradients(float scale) override
-	{
-		layerArrayRechannel.ApplyGradients(scale);
-
-		ForEachIndex<NumLayers>([&](auto layerIndex)
-			{
-				std::get<layerIndex>(layers).ApplyGradients(scale);
-			});
-
-		headRechannel.ApplyGradients(scale);
 	}
 
 private:

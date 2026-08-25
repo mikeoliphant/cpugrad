@@ -5,6 +5,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <xmmintrin.h>
 
 #include "NeuralModel.h"
 #define DR_WAV_IMPLEMENTATION
@@ -31,7 +32,7 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	DataGen dataGen;
 
-	auto input = dataGen.GenerateSin(numSamples);
+	auto input = dataGen.GenerateSin(numSamples, numSamples);
 
 	std::vector<float> namOutput(numSamples);
 
@@ -129,19 +130,11 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 			dOneByOneOut.SetZero();
 		}
 
-		void ResetGradients() override
+		void AddWeightGradients(OptimizerT<T>& optimizer) override
 		{
-			rechannel.ResetGradients();
-			conv.ResetGradients();
-			oneByOne.ResetGradients();
-		}
-
-
-		void ApplyGradients(float scale) override
-		{
-			rechannel.ApplyGradients(scale);
-			conv.ApplyGradients(scale);
-			oneByOne.ApplyGradients(scale);
+			rechannel.AddWeightGradients(optimizer);
+			conv.AddWeightGradients(optimizer);
+			oneByOne.AddWeightGradients(optimizer);
 		}
 
 	private:
@@ -160,14 +153,17 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 
 int main()
 {
+	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+
 	DataGen dataGen;
 
-	size_t numSamples = 48000 * 180;
+	size_t numSamples = 48000 * 10;
 
-	auto rand = dataGen.GenerateRandom(numSamples);
-	auto sin = dataGen.GenerateSin(numSamples);
-	auto delay = dataGen.GenerateDelay(1, numSamples);
-	auto tempXor = dataGen.GenerateXOR(1, numSamples);
+	auto randData = dataGen.GenerateRandom(numSamples);
+	auto sinData = dataGen.GenerateSin(numSamples, 8192);
+	auto delayData = dataGen.GenerateDelay(1, numSamples);
+	auto xorData = dataGen.GenerateXOR(1, numSamples);
 
 	//TestNAM(R"(C:\Code\NeuralCpuTrainer\BossWN-a2lite.nam)");
 
@@ -186,20 +182,20 @@ int main()
 	//Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
 	//auto convTrainer = new ModelTrainerT<float>(convBackprop);
 
-	//convTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
+	////convTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
-	//convTrainer->TestDelay(1);
+	//convTrainer->TrainIdentity(randData);
 
 	//WaveNetLayerBackpropT<float, 1, 3, 1> wn;
 	//TestModel(wn);
 
-	auto convTest = new ConvTestT<float, 1, 3, 3, 1, 1>();
+	//auto convTest = new ConvTestT<float, 1, 3, 3, 1, 1>();
 
-	auto convTestTrainer = new ModelTrainerT<float>(*convTest);
+	//auto convTestTrainer = new ModelTrainerT<float>(*convTest);
 
-	convTestTrainer->TrainIdentity(rand);
+	//convTestTrainer->TrainIdentity(randData);
 
-	//convTestTrainer->TestXOR(1);
+	//convTestTrainer->Train(xorData);
 	//convTestTrainer->TestIdentity();
 
 	//convTestTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
@@ -207,16 +203,17 @@ int main()
 
 	//auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
-	using TestKernelSizes = std::integer_sequence<int, 6>; //, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
-	using TestDilations = std::integer_sequence<int, 1>; //, 3, 7, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
+	using TestKernelSizes = std::integer_sequence<int, 6, 6, 6>; //, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
+	using TestDilations = std::integer_sequence<int, 1, 3, 7>; //, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
 
 	auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
+	//auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
 	auto modelTrainer = new ModelTrainerT<float>(*a2);
+	
+	//modelTrainer->TrainIdentity(sinData);
 
-	modelTrainer->TrainIdentity(rand);
-
-	//modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
+	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 
 	//ChainBackpropModelT<float, 1, 1> chainBackProp;
 
