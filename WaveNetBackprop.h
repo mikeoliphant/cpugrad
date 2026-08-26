@@ -7,7 +7,7 @@
 #include "Activation.h"
 #include "Optimizer.h"
 
-#define MAX_BATCH_SIZE 131072
+#define MAX_BATCH_SIZE 16384 //131072
 
 using namespace NeuralAudio;
 
@@ -208,7 +208,11 @@ namespace NeuralCpuTrain
 			void AddWeightGradients(OptimizerT<T>& optimizer) override
 			{
 				optimizer.AddWeightGradient(weights.GetData(), dWeights.GetData(), InSize * OutSize);
-				optimizer.AddWeightGradient(bias.data(), dBias.data(), OutSize);
+
+				if constexpr (DoBias)
+				{
+					optimizer.AddWeightGradient(bias.data(), dBias.data(), OutSize);
+				}
 			}
 
 		private:
@@ -320,7 +324,10 @@ namespace NeuralCpuTrain
 					optimizer.AddWeightGradient(weights[k].GetData(), dWeights[k].GetData(), OutChannels * InChannels);
 				}
 
-				optimizer.AddWeightGradient(bias.data(), dBias.data(), OutChannels);
+				if constexpr (DoBias)
+				{
+					optimizer.AddWeightGradient(bias.data(), dBias.data(), OutChannels);
+				}
 			}
 
 		private:

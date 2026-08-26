@@ -171,6 +171,8 @@ int main()
 	//DenseBackpropT<float, 1, 1, false> dense;
 	//auto denseTrainer = new ModelTrainerT<float>(dense);
 
+	//denseTrainer->TestBackprop(0, randData.data(), randData.data(), 16000);
+
 	//denseTrainer->TestIdentity();
 	//
 	//auto denseData = denseTrainter->GenerateSin(48000 * 180);
@@ -206,11 +208,13 @@ int main()
 	using TestKernelSizes = std::integer_sequence<int, 6, 6, 6>; //, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
 	using TestDilations = std::integer_sequence<int, 1, 3, 7>; //, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
 
-	auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
-	//auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
+	//auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
+	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
 	auto modelTrainer = new ModelTrainerT<float>(*a2);
 	
+	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), 16000);
+
 	//modelTrainer->TrainIdentity(sinData);
 
 	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <chrono>
 #include <filesystem>
 #include "dr_wav.h"
 
@@ -9,13 +10,15 @@
 
 namespace NeuralCpuTrain
 {
+	using Clock = std::chrono::steady_clock;
+
 	template <typename T>
 	class LossT
 	{
 		public:
 			virtual ~LossT() = default;
 			virtual std::string& GetName() { return name; }
-			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, T scaleFactor) = 0;
+			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, double scaleFactor) = 0;
 			virtual double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) = 0;
 
 		protected:
@@ -31,24 +34,26 @@ namespace NeuralCpuTrain
 				this->name = "MSE";
 			}
 
-			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, T scaleFactor) override
+			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, double scaleFactor) override
 			{
+				double scale = scaleFactor / static_cast<double>(numSamples - receptiveFieldSize);
+
 				for (size_t t = 0; t < numSamples; t++)
 				{
 					if (t < receptiveFieldSize)
 						outGradient[t] = 0;
 					else
-						outGradient[t] = ((TCONST(2) * (output[t] - target[t])) / static_cast<T>(numSamples - receptiveFieldSize)) * scaleFactor;
+						outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 				}
 			}
 
 			double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) override
 			{
-				T tot = TCONST(0);
+				double tot = 0;
 
 				for (size_t t = receptiveFieldSize; t < numSamples; t++)
 				{
-					T diff = output[t] - target[t];
+					double diff = static_cast<double>(output[t]) - static_cast<double>(target[t]);
 					tot += (diff * diff);
 				}
 
@@ -67,7 +72,7 @@ namespace NeuralCpuTrain
 			this->name = "ESR";
 		}
 
-		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, T scaleFactor) override
+		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, double scaleFactor) override
 		{
 			double totEnergy = 0;
 
@@ -78,12 +83,14 @@ namespace NeuralCpuTrain
 
 			totEnergy += epsilon;
 
+			double scale = scaleFactor / totEnergy;
+
 			for (size_t t = 0; t < numSamples; t++)
 			{
 				if (t < receptiveFieldSize)
 					outGradient[t] = 0;
 				else
-					outGradient[t] = ((TCONST(2) * (output[t] - target[t])) / static_cast<T>(totEnergy)) * scaleFactor;
+					outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 			}
 		}
 
@@ -98,18 +105,18 @@ namespace NeuralCpuTrain
 
 			totEnergy += epsilon;
 
-			T tot = TCONST(0);
+			double tot = 0;
 
 			for (size_t t = 0; t < numSamples; t++)
 			{
 				if (t >= receptiveFieldSize)
 				{
-					T diff = output[t] - target[t];
+					double diff = static_cast<double>(output[t]) - static_cast<double>(target[t]);
 					tot += (diff * diff);
 				}
 			}
 
-			return (tot / totEnergy) * static_cast<T>(numSamples - receptiveFieldSize);
+			return (tot / totEnergy) * static_cast<double>(numSamples - receptiveFieldSize);
 		}
 	};
 
@@ -168,21 +175,19 @@ namespace NeuralCpuTrain
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
 			{
 				size_t receptiveField = modelBackprop->GetReceptiveField();
-				//size_t batchSize = receptiveField + 8192;
-				size_t batchSize = MAX_BATCH_SIZE;
-				size_t validSampleCount = batchSize - receptiveField;
+				size_t maxTrainingSize = MAX_BATCH_SIZE - receptiveField;
+				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
 
-				size_t currentOffset = 0;	// ** NOTE - we will have invalid data for the initial receptive field
-				int samplesRemaining = (int)totalSamples;
+				while (currentOffset < totalSamples)
+				{
+					size_t samplesRemaining = totalSamples - currentOffset;
 
-				std::vector<float> verifyOutput(totalSamples);
-
-				while (samplesRemaining > 0)
-				{					
-					size_t thisBatchSize = (size_t)std::min(samplesRemaining, (int)batchSize);
+					size_t trainingSize = std::min(maxTrainingSize, samplesRemaining);
+					size_t thisBatchSize = trainingSize + receptiveField;
+					size_t trainingStart = currentOffset - receptiveField;
 
 					T* batchInPtr = batchInput.GetData();
-					std::copy(input + currentOffset, input + currentOffset + thisBatchSize, batchInPtr);
+					std::copy(input + trainingStart, input + trainingStart + thisBatchSize, batchInPtr);
 
 					forwardOutput.SetZero();
 
@@ -191,16 +196,75 @@ namespace NeuralCpuTrain
 					modelBackprop->Forward(batchInput.Slice(thisBatchSize), forwardOutput.Slice(thisBatchSize));
 
 					T* forwardOutputPtr = forwardOutput.GetData();
-					std::copy(forwardOutputPtr + receptiveField, forwardOutputPtr + thisBatchSize, output + currentOffset + receptiveField);
+					std::copy(forwardOutputPtr + receptiveField, forwardOutputPtr + thisBatchSize, output + currentOffset);
 
-					currentOffset += validSampleCount;
-					samplesRemaining -= (int)validSampleCount;
+					currentOffset += trainingSize;
 				}
+			}
+
+			void TestBackprop(size_t weightIndex, const T* input, T* target, const size_t numSamples)
+			{
+				T* weightPtr = optimizer->GetWeightPtr(weightIndex);
+				T* dWeightPtr = optimizer->GetDWeightPtr(weightIndex);
+
+				modelBackprop->RandomizeWeights();
+
+				size_t receptiveField = modelBackprop->GetReceptiveField();
+
+				float* batchInPtr = batchInput.GetData();
+				std::copy(input, input + numSamples, batchInPtr);
+
+				auto batchTargetPtr = batchTarget.GetData();
+				std::copy(target, target + numSamples, batchTargetPtr);
+
+				double delta = 0.001;
+
+				T originalWeight = *weightPtr;
+
+				*weightPtr = originalWeight + (T)delta;
+
+				forwardOutput.SetZero();
+
+				modelBackprop->Reset();
+
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+
+				double upErr = lossFunction->GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / static_cast<double>(numSamples - receptiveField);
+
+				*weightPtr = originalWeight - (T)delta;
+
+				forwardOutput.SetZero();
+
+				modelBackprop->Reset();
+
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+
+				double downErr = lossFunction->GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / static_cast<double>(numSamples - receptiveField);
+
+				*weightPtr = originalWeight;
+
+				forwardOutput.SetZero();
+
+				modelBackprop->Reset();
+				optimizer->ResetGradients();
+
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+
+				lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), numSamples, receptiveField, 1.0f);
+
+				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(numSamples), layerOutputGradient.Slice(numSamples));
+
+				double numGrad = (upErr - downErr) / (2.0 * delta); 
+
+				double relErr = (*dWeightPtr - numGrad) / std::max({ std::abs((double)*dWeightPtr), std::abs(numGrad), 1e-8 });
+
+				std::cout << "DWeight: " << *dWeightPtr << " NumGrad: " << numGrad << " RelErr: " << relErr << std::endl;
 			}
 
 			void TrainModel(const T* input, T* target, const size_t trainingSamples, const T* verifyInput, const T* verifyTarget, const size_t verifySamples)
 			{
 				float learningRate = 0.004f;
+				float learningRateDecay = 0.993f;
 
 				//ApplyHPF(target, totalSamples);
 
@@ -208,6 +272,9 @@ namespace NeuralCpuTrain
 
 				size_t trainingSize = 8192;
 				size_t receptiveField = modelBackprop->GetReceptiveField();
+
+				if ((trainingSize + receptiveField) > MAX_BATCH_SIZE)
+					throw std::runtime_error("MAX_BATCH_SIZE is too small");
 
 				TrainingData trainingData(trainingSamples, trainingSize, receptiveField);
 
@@ -221,8 +288,14 @@ namespace NeuralCpuTrain
 
 				for (int iter = 0; iter < 20000; ++iter)
 				{
+					auto epochStart = Clock::now();
+					auto forwardDuration = Clock::duration::zero();
+					auto backDuration = Clock::duration::zero();
+					auto gradDuration = Clock::duration::zero();
+
 					trainingData.ShuffleBatches();
 
+					optimizer->SetLearningRate(learningRate);
 					optimizer->ResetGradients();
 					//modelBackprop->ResetGradients();
 
@@ -251,7 +324,9 @@ namespace NeuralCpuTrain
 
 							modelBackprop->Reset();
 
+							auto forwardStart = Clock::now();
 							modelBackprop->Forward(batchInput.Slice(thisBatchSize), forwardOutput.Slice(thisBatchSize));
+							forwardDuration += (Clock::now() - forwardStart);
 
 							//ApplyHPF(forwardOutput.GetData() + receptiveField, thisBatchSize - receptiveField);
 
@@ -259,11 +334,15 @@ namespace NeuralCpuTrain
 
 							//std::cout << "Batch loss: " << lossFunction->GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), thisBatchSize, receptiveField) / (float)thisBatchSize << std::endl;
 
+							auto backStart = Clock::now();
 							modelBackprop->Backward(batchInput.Slice(thisBatchSize), outputGradient.Slice(thisBatchSize), layerOutputGradient.Slice(thisBatchSize));
+							backDuration += (Clock::now() - backStart);
 						}
 
+						auto gradStart = Clock::now();
 						optimizer->ApplyGradients();
 						optimizer->ResetGradients();
+						gradDuration += (Clock::now() - gradStart);
 
 						//modelBackprop->ApplyGradients(learningRate);
 						//modelBackprop->ResetGradients();
@@ -273,7 +352,11 @@ namespace NeuralCpuTrain
 
 					double err = lossFunction->GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
 
-					std::cout << "Epoch: " << iter << " " << lossFunction->GetName() << ": " << std::format("{:.10f}", err);
+					auto epochEnd = Clock::now();
+
+					double epochTime = std::chrono::duration<double>(epochEnd - epochStart).count();
+
+					std::cout << "Epoch: " << iter << " " << std::format("{:.2f}", epochTime) << "s LR: " << learningRate << " " << lossFunction->GetName() << ": " << std::format("{:.10f}", err);
 					
 					if (lossEvalFunction->GetName() != lossFunction->GetName())
 					{
@@ -282,6 +365,14 @@ namespace NeuralCpuTrain
 					}
 
 					std::cout << std::endl;
+
+					double forwardTime = std::chrono::duration<double>(forwardDuration).count();
+					double backTime = std::chrono::duration<double>(backDuration).count();
+					double gradtime = std::chrono::duration<double>(gradDuration).count();
+
+					std::cout << "Forward: " << forwardTime << " Back: " << backTime << " Grad: " << gradtime << " Other: " << (epochTime - forwardTime - backTime - gradtime) << std::endl;
+
+					learningRate *= learningRateDecay;
 				}
 			}
 

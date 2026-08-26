@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept> 
 #include <vector>
 
 template <typename T>
@@ -18,6 +19,21 @@ class AdamWeightGradientT
 		void ResetGradients()
 		{
 			std::fill(dWeights, dWeights + numWeights, 0);
+		}
+
+		T* GetWeights()
+		{
+			return weights;
+		}
+
+		T* GetDWeights()
+		{
+			return dWeights;
+		}
+
+		size_t GetNumWeights()
+		{
+			return numWeights;
 		}
 
 		double GetSumSquareDWeights()
@@ -57,7 +73,8 @@ class AdamWeightGradientT
 				float m_hat = m[w] / biasCorrection1;
 				float v_hat = v[w] / biasCorrection2;
 
-				weights[w] -= (learningRate * m_hat) / ((float)std::sqrt(v_hat + epsilon));
+				//weights[w] -= (learningRate * m_hat) / ((float)std::sqrt(v_hat + epsilon));
+				weights[w] -= (learningRate * m_hat) / ((float)std::sqrt(v_hat) + epsilon);
 			}
 		}
 
@@ -83,6 +100,11 @@ class OptimizerT
 			(void)numWeights;
 		}
 
+		virtual void SetLearningRate(float learningRate)
+		{
+			(void)learningRate;
+		}
+
 		virtual void ResetGradients()
 		{
 		}
@@ -91,7 +113,27 @@ class OptimizerT
 		{
 		}
 
-	private:
+		size_t GetTotWeights()
+		{
+			return totWeights;
+		}
+
+		virtual T* GetWeightPtr(size_t weightIndex)
+		{
+			(void)weightIndex;
+			
+			return nullptr;
+		}
+
+		virtual T* GetDWeightPtr(size_t weightIndex)
+		{
+			(void)weightIndex;
+
+			return nullptr;
+		}
+
+	protected:
+		size_t totWeights = 0;
 };
 
 template <typename T>
@@ -101,6 +143,13 @@ class AdamOptimizerT : public OptimizerT<T>
 		void AddWeightGradient(T* weights, T* dWeights, size_t numWeights) override
 		{
 			weightGrads.emplace_back(weights, dWeights, numWeights);
+
+			this->totWeights += numWeights;
+		}
+
+		void SetLearningRate(float learningRate) override
+		{
+			this->learningRate = learningRate;
 		}
 
 		void ResetGradients() override
@@ -135,8 +184,47 @@ class AdamOptimizerT : public OptimizerT<T>
 			}
 		}
 
+		T* GetWeightPtr(size_t weightIndex) override
+		{
+			size_t weightsSoFar = 0;
+
+			for (AdamWeightGradientT<T>& grad : weightGrads)
+			{
+				size_t gradNumWeights = grad.GetNumWeights();
+
+				if (weightIndex < (weightsSoFar + gradNumWeights))
+				{
+					return grad.GetWeights() + (weightIndex - weightsSoFar);
+				}
+
+				weightsSoFar += gradNumWeights;
+			}
+
+			throw std::runtime_error("Weight index out of bounds");
+		}
+
+		T* GetDWeightPtr(size_t weightIndex) override
+		{
+			size_t weightsSoFar = 0;
+
+			for (AdamWeightGradientT<T>& grad : weightGrads)
+			{
+				size_t gradNumWeights = grad.GetNumWeights();
+
+				if (weightIndex < (weightsSoFar + gradNumWeights))
+				{
+					return grad.GetDWeights() + (weightIndex - weightsSoFar);
+				}
+
+				weightsSoFar += gradNumWeights;
+			}
+
+			throw std::runtime_error("Weight index out of bounds");
+		}
+
 	private:
 		std::vector<AdamWeightGradientT<T>> weightGrads;
 		float learningRate = 0.004;
+		float learningRateDecay = 0.993f;
 		float maxNorm = 1.0f;
 };
