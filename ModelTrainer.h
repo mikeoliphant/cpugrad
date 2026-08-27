@@ -159,17 +159,27 @@ namespace NeuralCpuTrain
 			std::mt19937 gen;
 	};
 
-	template <typename T>
+	template <typename T, typename ModelType>
 	class ModelTrainerT
 	{
 		public:
-			ModelTrainerT(BackpropModelT<T, 1, 1>& modelBackprop) :
-				modelBackprop(&modelBackprop),
+			ModelTrainerT() :
+				modelBackprop(std::make_unique<ModelType>()),
 				lossFunction(std::make_unique<MSELossT<T>>()),
 				lossEvalFunction(std::make_unique<ESRLossT<T>>()),
 				optimizer(std::make_unique<AdamOptimizerT<T>>())
 			{
 				this->modelBackprop->AddWeightGradients(*optimizer);
+			}
+
+			size_t GetReceptiveField()
+			{
+				return modelBackprop->GetReceptiveField();
+			}
+
+			ModelType* GetModel()
+			{
+				return modelBackprop.get();
 			}
 
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
@@ -286,7 +296,7 @@ namespace NeuralCpuTrain
 
 				std::vector<T> verifyOutput(verifySamples);
 
-				for (int iter = 0; iter < 20000; ++iter)
+				for (int epoch = 0; epoch < 20000; ++epoch)
 				{
 					auto epochStart = Clock::now();
 					auto forwardDuration = Clock::duration::zero();
@@ -350,7 +360,7 @@ namespace NeuralCpuTrain
 
 					double epochTime = std::chrono::duration<double>(epochEnd - epochStart).count();
 
-					std::cout << "Epoch: " << iter << " " << std::format("{:.2f}", epochTime) << "s LR: " << learningRate << " " << lossFunction->GetName() << ": " << std::format("{:.10f}", err);
+					std::cout << "Epoch: " << epoch << " " << std::format("{:.2f}", epochTime) << "s LR: " << learningRate << " " << lossFunction->GetName() << ": " << std::format("{:.10f}", err);
 					
 					if (lossEvalFunction->GetName() != lossFunction->GetName())
 					{
@@ -360,11 +370,14 @@ namespace NeuralCpuTrain
 
 					std::cout << std::endl;
 
-					double forwardTime = std::chrono::duration<double>(forwardDuration).count();
-					double backTime = std::chrono::duration<double>(backDuration).count();
-					double gradtime = std::chrono::duration<double>(gradDuration).count();
+					if (epoch == 0)
+					{
+						double forwardTime = std::chrono::duration<double>(forwardDuration).count();
+						double backTime = std::chrono::duration<double>(backDuration).count();
+						double gradtime = std::chrono::duration<double>(gradDuration).count();
 
-					std::cout << "Forward: " << forwardTime << " Back: " << backTime << " Grad: " << gradtime << " Other: " << (epochTime - forwardTime - backTime - gradtime) << std::endl;
+						std::cout << "Forward: " << forwardTime << " Back: " << backTime << " Grad: " << gradtime << " Other: " << (epochTime - forwardTime - backTime - gradtime) << std::endl;
+					}
 
 					learningRate *= learningRateDecay;
 				}
@@ -421,7 +434,7 @@ namespace NeuralCpuTrain
 			}
 
 		private:
-			BackpropModelT<float, 1, 1>* modelBackprop;
+			std::unique_ptr<ModelType> modelBackprop;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchInput;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchTarget;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> forwardOutput;

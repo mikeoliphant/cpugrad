@@ -26,9 +26,7 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	size_t numSamples = 24000; //48000 * 3;
 
-	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
-
-	auto modelTrainer = new ModelTrainerT<float>(*a2);
+	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
 
 	DataGen dataGen;
 
@@ -47,8 +45,8 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	auto it = weights.begin();
 
-	a2->SetWeights(it);
-	a2->SetHeadScale(*it);
+	modelTrainer->GetModel()->SetWeights(it);
+	modelTrainer->GetModel()->SetHeadScale(*it);
 
 	std::vector<float> verifyOutput(numSamples);
 
@@ -56,7 +54,7 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	MSELossT<float> mseLoss;
 
-	double err = mseLoss.GetTotSquared(verifyOutput.data(), namOutput.data(), numSamples, a2->GetReceptiveField()) / (float)(numSamples - a2->GetReceptiveField());
+	double err = mseLoss.GetTotSquared(verifyOutput.data(), namOutput.data(), numSamples, modelTrainer->GetReceptiveField()) / (float)(numSamples - modelTrainer->GetReceptiveField());
 
 	std::cout << "Err: " << err << std::endl;
 }
@@ -206,9 +204,9 @@ int main()
 	using TestDilations = std::integer_sequence<int, 1>;//, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
 
 	//auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
-	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
+	//auto a2 = new ();
 
-	auto modelTrainer = new ModelTrainerT<float>(*a2);
+	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
 	
 	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), 16000);
 

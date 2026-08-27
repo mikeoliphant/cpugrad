@@ -222,11 +222,6 @@ namespace NeuralCpuTrain
 			void RandomizeWeights() override
 			{
 				BackpropModelT<T, InChannels, OutChannels>::RandomizeWeights();
-
-				//if constexpr (DoBias)
-				//{
-				//	bias.setZero();
-				//}
 			}
 
 			void SetWeights(std::vector<float>::iterator& inWeights) override
