@@ -297,7 +297,6 @@ namespace NeuralCpuTrain
 
 					optimizer->SetLearningRate(learningRate);
 					optimizer->ResetGradients();
-					//modelBackprop->ResetGradients();
 
 					size_t currentBatchNum = 0;
 
@@ -306,8 +305,6 @@ namespace NeuralCpuTrain
 						size_t thisMiniBatchSize = std::min(miniBatchSize, (totBatches - currentBatchNum));
 
 						float lossScale = 1.0f / (float)thisMiniBatchSize;
-
-						//std::cout << lossScale << " " << thisMiniBatchSize << std::endl;
 
 						for (size_t b = 0; b < thisMiniBatchSize; b++, currentBatchNum++)
 						{
@@ -343,9 +340,6 @@ namespace NeuralCpuTrain
 						optimizer->ApplyGradients();
 						optimizer->ResetGradients();
 						gradDuration += (Clock::now() - gradStart);
-
-						//modelBackprop->ApplyGradients(learningRate);
-						//modelBackprop->ResetGradients();
 					}
 
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);

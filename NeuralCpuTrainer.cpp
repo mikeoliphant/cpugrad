@@ -173,10 +173,7 @@ int main()
 
 	//denseTrainer->TestBackprop(0, randData.data(), randData.data(), 16000);
 
-	//denseTrainer->TestIdentity();
-	//
-	//auto denseData = denseTrainter->GenerateSin(48000 * 180);
-	//denseTrainter->TestIdentity(denseData);
+	//denseTrainer->TrainIdentity(randData);
 
 
 	//denseTrainter->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
@@ -184,14 +181,14 @@ int main()
 	//Conv1DBackpropT<float, 1, 1, 3, true, 1> convBackprop;
 	//auto convTrainer = new ModelTrainerT<float>(convBackprop);
 
-	////convTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
-
 	//convTrainer->TrainIdentity(randData);
+
+	////convTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\v1_1_1.wav)");
 
 	//WaveNetLayerBackpropT<float, 1, 3, 1> wn;
 	//TestModel(wn);
 
-	//auto convTest = new ConvTestT<float, 1, 3, 3, 1, 1>();
+	//auto convTest = new ConvTestT<float, 1, 16, 3, 1, 1>();
 
 	//auto convTestTrainer = new ModelTrainerT<float>(*convTest);
 
@@ -205,8 +202,8 @@ int main()
 
 	//auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();
 
-	using TestKernelSizes = std::integer_sequence<int, 6, 6, 6>; //, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
-	using TestDilations = std::integer_sequence<int, 1, 3, 7>; //, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
+	using TestKernelSizes = std::integer_sequence<int, 6>;//, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
+	using TestDilations = std::integer_sequence<int, 1>;//, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
 
 	//auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
 	auto a2 = new A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>();

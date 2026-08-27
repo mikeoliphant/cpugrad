@@ -13,6 +13,8 @@ using namespace NeuralAudio;
 
 namespace NeuralCpuTrain
 {
+	
+
 	template <typename T>
 	class BackpropModelBaseT
 	{
@@ -139,17 +141,49 @@ namespace NeuralCpuTrain
 			{
 				return OutChannels;
 			}
+
+		protected:
+			void ComputeDW(const float* dY_ptr, const float* X_ptr, float* dW_ptr, size_t N)
+			{
+				float dW_local[OutChannels * InChannels] = { 0.0f };
+
+				for (size_t t = 0; t < N; ++t)
+				{
+					const float* dY_t = dY_ptr + (t * OutChannels);
+					const float* X_t = X_ptr + (t * InChannels);
+
+#pragma unroll
+					for (int j = 0; j < InChannels; ++j)
+					{
+						const float x_val = X_t[j];
+
+#pragma unroll
+						for (int i = 0; i < OutChannels; ++i)
+						{
+							dW_local[i + j * OutChannels] += dY_t[i] * x_val;
+						}
+					}
+				}
+
+#pragma unroll
+				for (int k = 0; k < OutChannels * InChannels; ++k)
+				{
+					dW_ptr[k] += dW_local[k];
+				}
+			}
 	};
 	
-	template <typename T, int InSize, int OutSize, bool DoBias>
-	class DenseBackpropT : public BackpropModelT<T, InSize, OutSize>
+	template <typename T, int InChannels, int OutChannels, bool DoBias>
+	class DenseBackpropT : public BackpropModelT<T, InChannels, OutChannels>
 	{
+		using BackpropModelT<T, InChannels, OutChannels>::ComputeDW;
+
 		public:
 			DenseBackpropT()
 			{
 			}
 
-			void Forward(const ChannelRowSpan<T, InSize>& input, const ChannelRowSpan<T, OutSize>& output) override
+			void Forward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& output) override
 			{
 				if constexpr (DoBias)
 				{
@@ -161,15 +195,18 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void Backward(const ChannelRowSpan<T, InSize>& input,
-				const ChannelRowSpan<T, OutSize>& dOutput,
-				const ChannelRowSpan<T, InSize>& dInput) override
+			void Backward(const ChannelRowSpan<T, InChannels>& input,
+				const ChannelRowSpan<T, OutChannels>& dOutput,
+				const ChannelRowSpan<T, InChannels>& dInput) override
 			{
 				dInput.GetEigenMap().noalias() = weights.GetEigenMapConst().transpose() * dOutput.GetEigenMapConst();
+				//dInput.GetEigenMap().noalias() = weights.GetEigenMapTransposedConst() * dOutput.GetEigenMapConst();
 
-				auto map = dWeights.GetEigenMap();
+				//auto map = dWeights.GetEigenMap();
 
-				map.noalias() += dOutput.GetEigenMapConst() * input.GetEigenMapConst().transpose();
+				//map.noalias() += dOutput.GetEigenMapConst() * input.GetEigenMapConst().transpose();
+
+				ComputeDW(dOutput.GetDataConst(), input.GetDataConst(), dWeights.GetData(), dOutput.GetNumCols());
 
 				if constexpr (DoBias)
 				{
@@ -179,12 +216,12 @@ namespace NeuralCpuTrain
 
 			size_t GetNumWeights() override
 			{
-				return OutSize * InSize + (DoBias ? OutSize : 0);
+				return OutChannels * InChannels + (DoBias ? OutChannels : 0);
 			}
 
 			void RandomizeWeights() override
 			{
-				BackpropModelT<T, InSize, OutSize>::RandomizeWeights();
+				BackpropModelT<T, InChannels, OutChannels>::RandomizeWeights();
 
 				//if constexpr (DoBias)
 				//{
@@ -194,37 +231,39 @@ namespace NeuralCpuTrain
 
 			void SetWeights(std::vector<float>::iterator& inWeights) override
 			{
-				for (size_t i = 0; i < OutSize; i++)
-					for (size_t j = 0; j < InSize; j++)
+				for (size_t i = 0; i < OutChannels; i++)
+					for (size_t j = 0; j < InChannels; j++)
 						weights(i, j) = *(inWeights++);
 
 				if constexpr (DoBias)
 				{
-					for (size_t i = 0; i < OutSize; i++)
+					for (size_t i = 0; i < OutChannels; i++)
 						bias(i) = *(inWeights++);
 				}
 			}
 
 			void AddWeightGradients(OptimizerT<T>& optimizer) override
 			{
-				optimizer.AddWeightGradient(weights.GetData(), dWeights.GetData(), InSize * OutSize);
+				optimizer.AddWeightGradient(weights.GetData(), dWeights.GetData(), InChannels * OutChannels);
 
 				if constexpr (DoBias)
 				{
-					optimizer.AddWeightGradient(bias.data(), dBias.data(), OutSize);
+					optimizer.AddWeightGradient(bias.data(), dBias.data(), OutChannels);
 				}
 			}
 
 		private:
-			ChannelBuffer<T, OutSize, InSize> weights;
-			Eigen::Vector<T, OutSize> bias;
-			ChannelBuffer<T, OutSize, InSize> dWeights;
-			Eigen::Vector<T, OutSize> dBias;
+			ChannelBuffer<T, OutChannels, InChannels> weights;
+			Eigen::Vector<T, OutChannels> bias;
+			ChannelBuffer<T, OutChannels, InChannels> dWeights;
+			Eigen::Vector<T, OutChannels> dBias;
 	};
 
 	template <typename T, int InChannels, int OutChannels, int KernelSize, bool DoBias, int Dilation>
 	class Conv1DBackpropT : public BackpropModelT<T, InChannels, OutChannels>
 	{
+		using BackpropModelT<T, InChannels, OutChannels>::ComputeDW;
+	
 		public:
 			Conv1DBackpropT()
 			{
@@ -253,7 +292,7 @@ namespace NeuralCpuTrain
 			void Backward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& dOutput, const ChannelRowSpan<T, InChannels>& dInput) override
 			{
 				const size_t numFrames = dOutput.GetNumCols();
-				const auto doutMap = dOutput.GetEigenMap();
+				const auto doutMap = dOutput.GetEigenMapConst();
 				
 				if constexpr (DoBias)
 				{
@@ -268,9 +307,12 @@ namespace NeuralCpuTrain
 
 					const auto inBlock = input.Slice(0, validSize);
 					const auto dOutputBlock = dOutput.Slice(offset, validSize);
-			
-					auto dwMap = dWeights[k].GetEigenMap();
-					dwMap.noalias() += dOutputBlock.GetEigenMapConst() * inBlock.GetEigenMapConst().transpose();
+
+					//auto dwMap = dWeights[k].GetEigenMap();
+
+					//dwMap.noalias() += dOutputBlock.GetEigenMapConst() * inBlock.GetEigenMapConst().transpose();
+
+					ComputeDW(dOutputBlock.GetDataConst(), inBlock.GetDataConst(), dWeights[k].GetData(), numFrames);
 
 					auto wMap = weights[k].GetEigenMapConst();
 					auto dInputMap = dInput.Slice(0, validSize).GetEigenMap();
