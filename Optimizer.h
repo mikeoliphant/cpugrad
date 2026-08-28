@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <stdexcept> 
 #include <vector>
 
@@ -152,6 +153,30 @@ class AdamOptimizerT : public OptimizerT<T>
 			this->learningRate = learningRate;
 		}
 
+		void CopyWeightsFrom(AdamOptimizerT& otherOptimizer)
+		{
+			for (size_t i = 0; i < weightGrads.size(); i++)
+			{
+				size_t numWeights = weightGrads[i].GetNumWeights();
+
+				std::copy(otherOptimizer.GetWeightGrads()[i].GetWeights(), otherOptimizer.GetWeightGrads()[i].GetWeights() + numWeights, weightGrads[i].GetWeights());
+			}
+		}
+
+		void AddDWeightsTo(AdamOptimizerT& otherOptimizer)
+		{
+			for (size_t i = 0; i < weightGrads.size(); i++)
+			{
+				size_t numWeights = weightGrads[i].GetNumWeights();
+
+				const T* src = weightGrads[i].GetDWeights();
+				T* dest = otherOptimizer.GetWeightGrads()[i].GetDWeights();
+
+				for (size_t w = 0; w < numWeights; w++)
+					dest[w] += src[w];
+			}
+		}
+
 		void ResetGradients() override
 		{
 			for (AdamWeightGradientT<T>& grad : weightGrads)
@@ -182,6 +207,11 @@ class AdamOptimizerT : public OptimizerT<T>
 			{
 				grad.ApplyGradients(learningRate, scaleFactor);
 			}
+		}
+
+		std::vector<AdamWeightGradientT<T>>& GetWeightGrads()
+		{
+			return weightGrads;
 		}
 
 		T* GetWeightPtr(size_t weightIndex) override

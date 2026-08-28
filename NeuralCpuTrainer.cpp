@@ -154,7 +154,7 @@ int main()
 	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 
-	DataGen dataGen;
+	DataGen dataGen(123);
 
 	size_t numSamples = 48000 * 10;
 
@@ -206,9 +206,11 @@ int main()
 	//auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
 	//auto a2 = new ();
 
+	//std::cout << sizeof(A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>) << std::endl;
+
 	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
 	
-	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), 16000);
+	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
 
 	//modelTrainer->TrainIdentity(sinData);
 

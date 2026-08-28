@@ -7,21 +7,19 @@
 #include "Activation.h"
 #include "Optimizer.h"
 
-#define MAX_BATCH_SIZE 16384 //131072
+#define MAX_BATCH_SIZE 14538
 
 using namespace NeuralAudio;
 
 namespace NeuralCpuTrain
 {
-	
-
 	template <typename T>
 	class BackpropModelBaseT
 	{
 		static std::mt19937& getRand() {
-			//static std::mt19937 engine(123);
-			static std::random_device rd;
-			static std::mt19937 engine(rd());
+			static std::mt19937 engine(123);
+			//static std::random_device rd;
+			//static std::mt19937 engine(rd());
 
 			return engine;
 		}
@@ -143,32 +141,32 @@ namespace NeuralCpuTrain
 			}
 
 		protected:
-			void ComputeDW(const float* dY_ptr, const float* X_ptr, float* dW_ptr, size_t N)
+			void ComputeDW(const float* outPtr, const float* inPtr, float* dWPtr, size_t N)
 			{
-				float dW_local[OutChannels * InChannels] = { 0.0f };
+				float dWLocal[OutChannels * InChannels] = { 0.0f };
 
-				for (size_t t = 0; t < N; ++t)
+				for (size_t t = 0; t < N; t++)
 				{
-					const float* dY_t = dY_ptr + (t * OutChannels);
-					const float* X_t = X_ptr + (t * InChannels);
+					const float* outT = outPtr + (t * OutChannels);
+					const float* inT = inPtr + (t * InChannels);
 
 #pragma unroll
-					for (int j = 0; j < InChannels; ++j)
+					for (int j = 0; j < InChannels; j++)
 					{
-						const float x_val = X_t[j];
+						const float xVal = inT[j];
 
 #pragma unroll
-						for (int i = 0; i < OutChannels; ++i)
+						for (int i = 0; i < OutChannels; i++)
 						{
-							dW_local[i + j * OutChannels] += dY_t[i] * x_val;
+							dWLocal[i + j * OutChannels] += outT[i] * xVal;
 						}
 					}
 				}
 
 #pragma unroll
-				for (int k = 0; k < OutChannels * InChannels; ++k)
+				for (int k = 0; k < OutChannels * InChannels; k++)
 				{
-					dW_ptr[k] += dW_local[k];
+					dWPtr[k] += dWLocal[k];
 				}
 			}
 	};
@@ -200,7 +198,6 @@ namespace NeuralCpuTrain
 				const ChannelRowSpan<T, InChannels>& dInput) override
 			{
 				dInput.GetEigenMap().noalias() = weights.GetEigenMapConst().transpose() * dOutput.GetEigenMapConst();
-				//dInput.GetEigenMap().noalias() = weights.GetEigenMapTransposedConst() * dOutput.GetEigenMapConst();
 
 				//auto map = dWeights.GetEigenMap();
 
@@ -307,7 +304,7 @@ namespace NeuralCpuTrain
 
 					//dwMap.noalias() += dOutputBlock.GetEigenMapConst() * inBlock.GetEigenMapConst().transpose();
 
-					ComputeDW(dOutputBlock.GetDataConst(), inBlock.GetDataConst(), dWeights[k].GetData(), numFrames);
+					ComputeDW(dOutputBlock.GetDataConst(), inBlock.GetDataConst(), dWeights[k].GetData(), validSize);
 
 					auto wMap = weights[k].GetEigenMapConst();
 					auto dInputMap = dInput.Slice(0, validSize).GetEigenMap();
