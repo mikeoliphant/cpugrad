@@ -185,11 +185,11 @@ namespace NeuralCpuTrain
 			{
 				if constexpr (DoBias)
 				{
-					output.GetEigenMap().noalias() += (weights.GetEigenMapConst() * input.GetEigenMapConst()).colwise() + bias;
+					output.GetEigenMap().noalias() = (weights.GetEigenMapConst() * input.GetEigenMapConst()).colwise() + bias;
 				}
 				else
 				{
-					output.GetEigenMap().noalias() += weights.GetEigenMapConst() * input.GetEigenMapConst();
+					output.GetEigenMap().noalias() = weights.GetEigenMapConst() * input.GetEigenMapConst();
 				}
 			}
 

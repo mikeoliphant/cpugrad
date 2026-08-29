@@ -310,8 +310,11 @@ namespace NeuralCpuTrain
 				for (int epoch = 0; epoch < 20000; ++epoch)
 				{
 					auto epochStart = Clock::now();
-					auto forwardDuration = Clock::duration::zero();
-					auto backDuration = Clock::duration::zero();
+					auto trainDuration = Clock::duration::zero();
+
+					auto threadTotalDuration = Clock::duration::zero();
+					auto threadForwardDuration = Clock::duration::zero();
+					auto threadBackDuration = Clock::duration::zero();
 
 					trainingData.ShuffleBatches();
 
@@ -319,6 +322,11 @@ namespace NeuralCpuTrain
 					optimizer.ResetGradients();
 
 					size_t currentBatchNum = 0;
+
+					for (auto& worker : modelTrainerWorkers)
+					{
+						worker->ResetDurations();
+					}
 
 					for (size_t currentMiniBatchNum = 0; currentMiniBatchNum < numMiniBatches; currentMiniBatchNum++)
 					{
@@ -343,6 +351,8 @@ namespace NeuralCpuTrain
 							modelTrainerWorkers[b % modelTrainerWorkers.size()]->AddBatch(trainingData.Batches()[currentBatchNum]);
 						}
 
+						auto trainStart = Clock::now();
+
 						for (auto& worker : modelTrainerWorkers)
 						{
 							threads.emplace_back(
@@ -351,12 +361,12 @@ namespace NeuralCpuTrain
 								std::ref(input),
 								std::ref(target),
 								lossScale
-							);
-							
-							//worker->TrainBatches(input, target, lossScale);
+							);							
 						}
 
 						threads.clear();
+
+						trainDuration += (Clock::now() - trainStart);
 
 						for (size_t w = 1; w < std::min(modelTrainerWorkers.size(), thisMiniBatchSize); w++)
 						{
@@ -367,13 +377,16 @@ namespace NeuralCpuTrain
 						optimizer.ResetGradients();
 					}
 
+					for (auto& worker : modelTrainerWorkers)
+					{
+						worker->AddDurations(threadTotalDuration, threadForwardDuration, threadBackDuration);
+					}
+
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
 
 					double err = lossFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
 
-					auto epochEnd = Clock::now();
-
-					double epochTime = std::chrono::duration<double>(epochEnd - epochStart).count();
+					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
 					std::cout << "Epoch: " << epoch << " " << std::format("{:.2f}", epochTime) << "s LR: " << learningRate << " " << lossFunction.GetName() << ": " << std::format("{:.10f}", err);
 					
@@ -387,10 +400,15 @@ namespace NeuralCpuTrain
 
 					if (epoch == 0)
 					{
-						double forwardTime = std::chrono::duration<double>(forwardDuration).count();
-						double backTime = std::chrono::duration<double>(backDuration).count();
+						double trainTime = std::chrono::duration<double>(trainDuration).count();
 
-						std::cout << "Forward: " << forwardTime << " Back: " << backTime << " Other: " << (epochTime - forwardTime - backTime) << std::endl;
+						std::cout << "Train: " << trainTime << " Other: " << (epochTime - trainTime) << std::endl;
+
+						double threadTotalTime = std::chrono::duration<double>(threadTotalDuration).count();
+						double threadForwardTime = std::chrono::duration<double>(threadForwardDuration).count();
+						double threadBackTime = std::chrono::duration<double>(threadBackDuration).count();
+
+						std::cout << "Thread - Forward: " << threadForwardTime << " Back: " << threadBackTime << " Other: " << (threadTotalTime - threadForwardTime - threadBackTime) << std::endl;
 					}
 
 					learningRate *= learningRateDecay;
@@ -499,10 +517,26 @@ namespace NeuralCpuTrain
 				batches.push_back(batch);
 			}
 
+			void ResetDurations()
+			{
+				totalDuration = Clock::duration::zero();
+				forwardDuration = Clock::duration::zero();
+				backDuration = Clock::duration::zero();
+			}
+
+			void AddDurations(Clock::duration& total, Clock::duration& forward, Clock::duration& back)
+			{
+				total += totalDuration;
+				forward += forwardDuration;
+				back += backDuration;
+			}
+
 			void TrainBatches(const T* input, const T* target, double lossScale)
-			{				
+			{	
+				auto totalStart = Clock::now();
+
 				for (auto& b : batches)
-				{
+				{				
 					size_t numSamples = b.Size;
 
 					size_t receptiveField = modelBackprop->GetReceptiveField();
@@ -517,18 +551,20 @@ namespace NeuralCpuTrain
 
 					modelBackprop->Reset();
 
-					//auto forwardStart = Clock::now();
+					auto forwardStart = Clock::now();
 					modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
-					//forwardDuration += (Clock::now() - forwardStart);
+					forwardDuration += (Clock::now() - forwardStart);
 
 					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), numSamples, receptiveField, lossScale);
 
 					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / (float)(numSamples - receptiveField) << std::endl;
 
-					//auto backStart = Clock::now();
+					auto backStart = Clock::now();
 					modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(numSamples), layerOutputGradient.Slice(numSamples));
-					//backDuration += (Clock::now() - backStart);
+					backDuration += (Clock::now() - backStart);
 				}
+
+				totalDuration += (Clock::now() - totalStart);
 			}
 
 		private:
@@ -541,5 +577,9 @@ namespace NeuralCpuTrain
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
 			LossType lossFunction;
 			AdamOptimizerT<T> optimizer;
+			Clock::duration forwardDuration = Clock::duration::zero();
+			Clock::duration backDuration = Clock::duration::zero();
+			Clock::duration totalDuration = Clock::duration::zero();
+
 	};
 }

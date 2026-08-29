@@ -145,7 +145,6 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dReluOut;
 		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> reluOut;
 		Conv1DBackpropT<T, Channels, InOutChannels, HeadKernelSize, true, 1> oneByOne;
-		//DenseBackpropT<T, Channels, InOutChannels, true> oneByOne;
 		ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dOneByOneOut;
 };
 

@@ -15,18 +15,26 @@ public:
 	{
 		size_t numSamples = input.GetNumCols();
 
+		conv.Reset();
+		convOut.SetZero();
 		conv.Forward(input, convOut.Slice(numSamples));
 
+		conditionMixIn.Reset();
+		//conditionMixInOut.SetZero();
 		conditionMixIn.Forward(condition, conditionMixInOut.Slice(numSamples));
 
 		auto convOutMap = convOut.Slice(numSamples).GetEigenMap();
 		convOutMap.noalias() += conditionMixInOut.Slice(numSamples).GetEigenMapConst();
 
+		relu.Reset();
+		//reluOut.SetZero();
 		relu.Forward(convOut.Slice(numSamples), reluOut.Slice(numSamples));
 
 		auto headOutputMap = headOutput.GetEigenMap();
 		headOutputMap.noalias() += reluOut.Slice(numSamples).GetEigenMapConst();
 
+		oneByOne.Reset();
+		//output.SetZero();
 		oneByOne.Forward(reluOut.Slice(numSamples), output);
 
 		auto outputMap = output.GetEigenMap();
@@ -88,15 +96,11 @@ public:
 
 	void Reset() override
 	{
-		conv.Reset();
-		convOut.SetZero();
-		conditionMixIn.Reset();
-		conditionMixInOut.SetZero();
-		dConditionMixInOut.SetZero();
-		reluOut.SetZero();
-		dReluOut.SetZero();
-		oneByOne.Reset();
-		dOneByOneOut.SetZero();
+		// not clearing the gradient buffer works, but I'm not sure why...
+
+		//dConditionMixInOut.SetZero();
+		//dReluOut.SetZero();
+		//dOneByOneOut.SetZero();
 	}
 
 	void AddWeightGradients(OptimizerT<T>& optimizer) override
@@ -144,10 +148,14 @@ public:
 
 		headOutput.SetZero();
 
+		layerArrayRechannel.Reset();
+		//layerArrayRechannelOut.SetZero();
 		layerArrayRechannel.Forward(input, layerArrayRechannelOut.Slice(numSamples));
 
 		ForEachIndex<NumLayers>([&](auto layerIndex)
 			{
+				layerOuts[layerIndex].SetZero();
+
 				if constexpr (layerIndex == 0)
 				{
 					std::get<layerIndex>(layers).Forward(layerArrayRechannelOut.Slice(numSamples), input, layerOuts[layerIndex].Slice(numSamples), headOutput.Slice(numSamples));
@@ -158,6 +166,7 @@ public:
 				}
 			});
 
+		//headRechannel.Reset();
 		headRechannel.Forward(headOutput.Slice(numSamples), output);
 
 		auto outputMap = output.GetEigenMap();
@@ -171,11 +180,14 @@ public:
 		auto dOutputMap = dOutput.GetEigenMap();
 		dOutputMap *= headScale;
 
+		dHeadRechannelOut.SetZero();
 		headRechannel.Backward(headOutput.Slice(numSamples), dOutput, dHeadRechannelOut.Slice(numSamples));
 
 		ForEachIndex<NumLayers>([&](auto layerIndexForward)
 			{
 				constexpr auto layerIndexBackward = NumLayers - 1 - layerIndexForward;
+
+				dLayerOuts[layerIndexForward].SetZero();
 
 				if constexpr (layerIndexForward == 0)
 				{
@@ -237,19 +249,19 @@ public:
 
 	void Reset() override
 	{
-		layerArrayRechannel.Reset();
-		layerArrayRechannelOut.SetZero();
+		//layerArrayRechannel.Reset();
+		//layerArrayRechannelOut.SetZero();
 
-		ForEachIndex<NumLayers>([&](auto layerIndex)
-			{
-				std::get<layerIndex>(layers).Reset();
-				layerOuts[layerIndex].SetZero();
-				dLayerOuts[layerIndex].SetZero();
-			});
+		//ForEachIndex<NumLayers>([&](auto layerIndex)
+		//	{
+		//		std::get<layerIndex>(layers).Reset();
+		//		layerOuts[layerIndex].SetZero();
+		//		dLayerOuts[layerIndex].SetZero();
+		//	});
 
-		headOutput.SetZero();
-		headRechannel.Reset();
-		dHeadRechannelOut.SetZero();
+		//headOutput.SetZero();
+		//headRechannel.Reset();
+		//dHeadRechannelOut.SetZero();
 	}
 
 	void AddWeightGradients(OptimizerT<T>& optimizer) override
