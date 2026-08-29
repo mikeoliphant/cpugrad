@@ -125,6 +125,13 @@ namespace NeuralCpuTrain
 				(void)dInput;
 			}
 
+			virtual void BackwardNoDInput(const ChannelRowSpan<T, InChannels>& input,	// forward input data
+				const ChannelRowSpan<T, OutChannels>& dOutput)	// incoming backprop gradient
+			{
+				(void)input;
+				(void)dOutput;
+			}
+
 			size_t GetNumFeatures() override
 			{
 				return InChannels;
@@ -203,6 +210,17 @@ namespace NeuralCpuTrain
 
 				//map.noalias() += dOutput.GetEigenMapConst() * input.GetEigenMapConst().transpose();
 
+				ComputeDW(dOutput.GetDataConst(), input.GetDataConst(), dWeights.GetData(), dOutput.GetNumCols());
+
+				if constexpr (DoBias)
+				{
+					dBias.noalias() += dOutput.GetEigenMapConst().rowwise().sum();
+				}
+			}
+
+			void BackwardNoDInput(const ChannelRowSpan<T, InChannels>& input,
+				const ChannelRowSpan<T, OutChannels>& dOutput) override
+			{
 				ComputeDW(dOutput.GetDataConst(), input.GetDataConst(), dWeights.GetData(), dOutput.GetNumCols());
 
 				if constexpr (DoBias)

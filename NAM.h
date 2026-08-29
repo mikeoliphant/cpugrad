@@ -35,7 +35,7 @@ public:
 
 		oneByOne.Reset();
 		//output.SetZero();
-		oneByOne.Forward(reluOut.Slice(numSamples), output);
+		oneByOne.Forward(reluOut.Slice(numSamples), output);	// Not needed on last layer - can optimize
 
 		auto outputMap = output.GetEigenMap();
 		outputMap.noalias() += input.GetEigenMapConst();
@@ -52,7 +52,7 @@ public:
 
 		relu.Backward(convOut.Slice(numSamples), dOneByOneOut.Slice(numSamples), dReluOut.Slice(numSamples));
 
-		conditionMixIn.Backward(condition, dReluOut.Slice(numSamples), dConditionMixInOut.Slice(numSamples));	// dConditionMixInOut not used - can optimize
+		conditionMixIn.BackwardNoDInput(condition, dReluOut.Slice(numSamples));
 
 		conv.Backward(input, dReluOut.Slice(numSamples), dInput);
 
@@ -65,7 +65,7 @@ public:
 		size_t numSamples = input.GetNumCols();
 
 		relu.Backward(convOut.Slice(numSamples), dHeadOutput, dReluOut.Slice(numSamples));
-		conditionMixIn.Backward(condition, dReluOut.Slice(numSamples), dConditionMixInOut.Slice(numSamples));	// dConditionMixInOut not used - can optimize
+		conditionMixIn.BackwardNoDInput(condition, dReluOut.Slice(numSamples));
 		conv.Backward(input, dReluOut.Slice(numSamples), dInput);
 	}
 
@@ -115,7 +115,6 @@ private:
 	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> convOut;
 	DenseBackpropT<T, ConditionSize, Channels, false> conditionMixIn;
 	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> conditionMixInOut;
-	ChannelBuffer<T, ConditionSize, MAX_BATCH_SIZE> dConditionMixInOut;
 	LeakyReLUT<T, Channels> relu;
 	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> reluOut;
 	DenseBackpropT<T, Channels, Channels, true> oneByOne;
