@@ -128,11 +128,11 @@ class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>
 			dOneByOneOut.SetZero();
 		}
 
-		void AddWeightGradients(OptimizerT<T>& optimizer) override
+		void SetTrainingContext(TrainingContextT<T>* context) override
 		{
-			rechannel.AddWeightGradients(optimizer);
-			conv.AddWeightGradients(optimizer);
-			oneByOne.AddWeightGradients(optimizer);
+			rechannel.SetTrainingContext(context);
+			conv.SetTrainingContext(context);
+			oneByOne.SetTrainingContext(context);
 		}
 
 	private:
@@ -155,7 +155,7 @@ int main()
 
 	DataGen dataGen(123);
 
-	size_t numSamples = 48000 * 10;
+	size_t numSamples = 48000 * 180;
 
 	auto randData = dataGen.GenerateRandom(numSamples);
 	auto sinData = dataGen.GenerateSin(numSamples, 8192);
@@ -185,9 +185,7 @@ int main()
 	//WaveNetLayerBackpropT<float, 1, 3, 1> wn;
 	//TestModel(wn);
 
-	//auto convTest = new ConvTestT<float, 1, 16, 3, 1, 1>();
-
-	//auto convTestTrainer = new ModelTrainerT<float>(*convTest);
+	//auto convTestTrainer = new ModelTrainerT<float, ConvTestT<float, 1, 16, 3, 1, 1>>();
 
 	//convTestTrainer->TrainIdentity(randData);
 

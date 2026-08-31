@@ -170,8 +170,7 @@ namespace NeuralCpuTrain
 		public:
 			ModelTrainerT() :
 				lossFunction(),
-				lossEvalFunction(),
-				optimizer()
+				lossEvalFunction()
 			{
 				for (int w = 0; w < 8; w++)
 				{
@@ -181,8 +180,6 @@ namespace NeuralCpuTrain
 				mainWorker = modelTrainerWorkers[0].get();
 
 				this->modelBackprop = mainWorker->GetModel();
-
-				this->modelBackprop->AddWeightGradients(optimizer);
 			}
 			
 			size_t GetReceptiveField()
@@ -227,8 +224,8 @@ namespace NeuralCpuTrain
 
 			void TestBackprop(size_t weightIndex, const T* input, T* target, const size_t numSamples)
 			{
-				T* weightPtr = optimizer.GetWeightPtr(weightIndex);
-				T* dWeightPtr = optimizer.GetDWeightPtr(weightIndex);
+				T* weightPtr = mainWorker->GetOptimizer().GetWeightPtr(weightIndex);
+				T* dWeightPtr = mainWorker->GetOptimizer().GetDWeightPtr(weightIndex);
 
 				modelBackprop->RandomizeWeights();
 
@@ -269,7 +266,7 @@ namespace NeuralCpuTrain
 				forwardOutput.SetZero();
 
 				modelBackprop->Reset();
-				optimizer.ResetGradients();
+				mainWorker->GetOptimizer().ResetGradients();
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
 
@@ -318,8 +315,8 @@ namespace NeuralCpuTrain
 
 					trainingData.ShuffleBatches();
 
-					optimizer.SetLearningRate(learningRate);
-					optimizer.ResetGradients();
+					mainWorker->GetOptimizer().SetLearningRate(learningRate);
+					mainWorker->GetOptimizer().ResetGradients();
 
 					size_t currentBatchNum = 0;
 
@@ -343,7 +340,7 @@ namespace NeuralCpuTrain
 
 						for (size_t w = 1; w < modelTrainerWorkers.size(); w++)
 						{
-							modelTrainerWorkers[w]->CopyWeightsFrom(optimizer);
+							modelTrainerWorkers[w]->CopyWeightsFrom(mainWorker->GetOptimizer());
 						}
 
 						for (size_t b = 0; b < thisMiniBatchSize; b++, currentBatchNum++)
@@ -370,11 +367,11 @@ namespace NeuralCpuTrain
 
 						for (size_t w = 1; w < std::min(modelTrainerWorkers.size(), thisMiniBatchSize); w++)
 						{
-							modelTrainerWorkers[w]->AddDWeightsTo(optimizer);
+							modelTrainerWorkers[w]->AddDWeightsTo(mainWorker->GetOptimizer());
 						}
 
-						optimizer.ApplyGradients();
-						optimizer.ResetGradients();
+						mainWorker->GetOptimizer().ApplyGradients();
+						mainWorker->GetOptimizer().ResetGradients();
 					}
 
 					for (auto& worker : modelTrainerWorkers)
@@ -476,11 +473,10 @@ namespace NeuralCpuTrain
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
 			LossType lossFunction;
 			LossEvalType lossEvalFunction;
-			AdamOptimizerT<T> optimizer;
 	};
 
 	template <typename T, typename ModelType, typename LossType>
-	class TrainerWorkerT
+	class TrainerWorkerT : public TrainingContextT<T>
 	{
 		public:
 			TrainerWorkerT() :
@@ -488,12 +484,17 @@ namespace NeuralCpuTrain
 				lossFunction(),
 				optimizer()
 			{
-				this->modelBackprop->AddWeightGradients(optimizer);
+				this->modelBackprop->SetTrainingContext(this);
 			}
 
 			ModelType* GetModel()
 			{
 				return modelBackprop.get();
+			}
+
+			AdamOptimizerT<T>& GetOptimizer()
+			{
+				return optimizer;
 			}
 
 			void CopyWeightsFrom(AdamOptimizerT<T>& optimizer)
@@ -504,6 +505,11 @@ namespace NeuralCpuTrain
 			void AddDWeightsTo(AdamOptimizerT<T>& optimizer)
 			{
 				this->optimizer.AddDWeightsTo(optimizer);
+			}
+
+			void AddWeightGradient(T* weights, T* dWeights, size_t numWeights) override
+			{
+				optimizer.AddWeightGradient(weights, dWeights, numWeights);
 			}
 
 			void Reset()

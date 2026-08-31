@@ -10,6 +10,7 @@ class WaveNetLayerBackpropT : public BackpropModelT<T, Channels, Channels>
 public:
 	using BackpropModelT<T, Channels, Channels>::Forward;
 	using BackpropModelT<T, Channels, Channels>::Backward;
+	using BackpropModelT<T, Channels, Channels>::trainingContext;
 
 	void Forward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, ConditionSize>& condition, const ChannelRowSpan<T, Channels>& output, const ChannelRowSpan<T, Channels>& headOutput)
 	{
@@ -103,11 +104,11 @@ public:
 		//dOneByOneOut.SetZero();
 	}
 
-	void AddWeightGradients(OptimizerT<T>& optimizer) override
+	void SetTrainingContext(TrainingContextT<T>* context) override
 	{
-		conv.AddWeightGradients(optimizer);
-		conditionMixIn.AddWeightGradients(optimizer);
-		oneByOne.AddWeightGradients(optimizer);
+		conv.SetTrainingContext(context);
+		conditionMixIn.SetTrainingContext(context);
+		oneByOne.SetTrainingContext(context);
 	}
 
 private:
@@ -125,6 +126,8 @@ private:
 template <typename T, int InOutChannels, int Channels, typename KernelSizeSequence, typename DilationsSequence>
 class A2BackpropT : public BackpropModelT<T, InOutChannels, InOutChannels>
 {
+	using BackpropModelT<T, InOutChannels, InOutChannels>::trainingContext;
+
 	template <typename, typename>
 	struct LayersHelper
 	{};
@@ -263,15 +266,15 @@ public:
 		//dHeadRechannelOut.SetZero();
 	}
 
-	void AddWeightGradients(OptimizerT<T>& optimizer) override
+	void SetTrainingContext(TrainingContextT<T>* context) override
 	{
-		layerArrayRechannel.AddWeightGradients(optimizer);
+		layerArrayRechannel.SetTrainingContext(context);
 		ForEachIndex<NumLayers>([&](auto layerIndex)
 			{
-				std::get<layerIndex>(layers).AddWeightGradients(optimizer);
+				std::get<layerIndex>(layers).SetTrainingContext(context);
 			});
 
-		headRechannel.AddWeightGradients(optimizer);
+		headRechannel.SetTrainingContext(context);
 	}
 
 	void RandomizeWeights() override

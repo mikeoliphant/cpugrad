@@ -5,6 +5,20 @@
 #include <vector>
 
 template <typename T>
+class TrainingContextT
+{
+public:
+	virtual ~TrainingContextT() {}
+
+	virtual void AddWeightGradient(T* weights, T* dWeights, size_t numWeights)
+	{
+		(void)weights;
+		(void)dWeights;
+		(void)numWeights;
+	}
+};
+
+template <typename T>
 class AdamWeightGradientT
 {
 	public:

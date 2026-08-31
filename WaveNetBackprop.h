@@ -95,10 +95,19 @@ namespace NeuralCpuTrain
 			virtual void Reset()
 			{}
 
-			virtual void AddWeightGradients(OptimizerT<T>& optimizer)
+			virtual void AddWeightGradients()
 			{
-				(void)optimizer;
 			}
+
+			virtual void SetTrainingContext(TrainingContextT<T>* context)
+			{
+				this->trainingContext = context;
+
+				AddWeightGradients();
+			}
+
+		protected:
+			TrainingContextT<T>* trainingContext = nullptr;
 	};
 
 	template <typename T, int InChannels, int OutChannels>
@@ -182,6 +191,7 @@ namespace NeuralCpuTrain
 	class DenseBackpropT : public BackpropModelT<T, InChannels, OutChannels>
 	{
 		using BackpropModelT<T, InChannels, OutChannels>::ComputeDW;
+		using BackpropModelT<T, InChannels, OutChannels>::trainingContext;
 
 		public:
 			DenseBackpropT()
@@ -252,13 +262,13 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void AddWeightGradients(OptimizerT<T>& optimizer) override
+			void AddWeightGradients() override
 			{
-				optimizer.AddWeightGradient(weights.GetData(), dWeights.GetData(), InChannels * OutChannels);
+				trainingContext->AddWeightGradient(weights.GetData(), dWeights.GetData(), InChannels * OutChannels);
 
 				if constexpr (DoBias)
 				{
-					optimizer.AddWeightGradient(bias.data(), dBias.data(), OutChannels);
+					trainingContext->AddWeightGradient(bias.data(), dBias.data(), OutChannels);
 				}
 			}
 
@@ -273,7 +283,8 @@ namespace NeuralCpuTrain
 	class Conv1DBackpropT : public BackpropModelT<T, InChannels, OutChannels>
 	{
 		using BackpropModelT<T, InChannels, OutChannels>::ComputeDW;
-	
+		using BackpropModelT<T, InChannels, OutChannels>::trainingContext;
+
 		public:
 			Conv1DBackpropT()
 			{
@@ -369,16 +380,16 @@ namespace NeuralCpuTrain
 				}
 			}
 
-			void AddWeightGradients(OptimizerT<T>& optimizer) override
+			void AddWeightGradients() override
 			{
 				for (int k = 0; k < KernelSize; k++)
 				{
-					optimizer.AddWeightGradient(weights[k].GetData(), dWeights[k].GetData(), OutChannels * InChannels);
+					trainingContext->AddWeightGradient(weights[k].GetData(), dWeights[k].GetData(), OutChannels * InChannels);
 				}
 
 				if constexpr (DoBias)
 				{
-					optimizer.AddWeightGradient(bias.data(), dBias.data(), OutChannels);
+					trainingContext->AddWeightGradient(bias.data(), dBias.data(), OutChannels);
 				}
 			}
 
