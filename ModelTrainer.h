@@ -8,6 +8,7 @@
 #include "dr_wav.h"
 
 #include "WaveNetBackprop.h"
+#include "BatchBuffer.h"
 #include "Optimizer.h"
 
 namespace NeuralCpuTrain
@@ -482,7 +483,8 @@ namespace NeuralCpuTrain
 			TrainerWorkerT() :
 				modelBackprop(std::make_unique<ModelType>()),
 				lossFunction(),
-				optimizer()
+				optimizer(),
+				bufferArena(4ULL * 1024 * 1024 * 1024)
 			{
 				this->modelBackprop->SetTrainingContext(this);
 			}
@@ -495,6 +497,11 @@ namespace NeuralCpuTrain
 			AdamOptimizerT<T>& GetOptimizer()
 			{
 				return optimizer;
+			}
+
+			BatchBufferArenaT<T>& GetBufferArena() override
+			{
+				return bufferArena;
 			}
 
 			void CopyWeightsFrom(AdamOptimizerT<T>& optimizer)
@@ -565,9 +572,15 @@ namespace NeuralCpuTrain
 
 					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / (float)(numSamples - receptiveField) << std::endl;
 
+					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(MAX_BATCH_SIZE);
+
 					auto backStart = Clock::now();
 					modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(numSamples), layerOutputGradient.Slice(numSamples));
 					backDuration += (Clock::now() - backStart);
+
+					bufferArena.FreeScratchBuffer(layerOutputGradient);
+
+					bufferArena.Release();
 				}
 
 				totalDuration += (Clock::now() - totalStart);
@@ -576,13 +589,14 @@ namespace NeuralCpuTrain
 		private:
 			std::vector<TrainingDataBatch> batches;
 			std::unique_ptr<ModelType> modelBackprop;
+			LossType lossFunction;
+			AdamOptimizerT<T> optimizer;
+			BatchBufferArenaT<T> bufferArena;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchInput;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchTarget;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> forwardOutput;
 			ChannelBuffer<float, 1, MAX_BATCH_SIZE> outputGradient;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
-			LossType lossFunction;
-			AdamOptimizerT<T> optimizer;
+			//ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
 			Clock::duration forwardDuration = Clock::duration::zero();
 			Clock::duration backDuration = Clock::duration::zero();
 			Clock::duration totalDuration = Clock::duration::zero();

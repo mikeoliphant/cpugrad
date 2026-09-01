@@ -3,8 +3,7 @@
 #include <array>
 #include <vector>
 #include <format>
-#include "WaveNet.h"
-#include "Activation.h"
+#include "ChannelBuffer.h"
 #include "Optimizer.h"
 
 #define MAX_BATCH_SIZE 14538

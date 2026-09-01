@@ -37,6 +37,7 @@ set(SOURCES
 	WaveNetBackprop.h
 	Dataset.h
 	Optimizer.h
+	BatchBuffer.h
 	NAM.h)
 
 add_executable(NeuralCpuTrainer ${SOURCES})

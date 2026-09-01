@@ -4,11 +4,15 @@
 #include <stdexcept> 
 #include <vector>
 
+#include "BatchBuffer.h"
+
 template <typename T>
 class TrainingContextT
 {
 public:
 	virtual ~TrainingContextT() {}
+
+	virtual BatchBufferArenaT<T>& GetBufferArena() = 0;
 
 	virtual void AddWeightGradient(T* weights, T* dWeights, size_t numWeights)
 	{
