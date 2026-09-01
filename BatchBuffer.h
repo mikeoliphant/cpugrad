@@ -49,10 +49,9 @@ class BatchBufferArenaT
             scratchPool.deallocate(buf.GetData(), buf.GetSize() * sizeof(T), SIMD_ALIGN);
         }
 
-        void Release()
+        void ReleaseScratch()
         {
             scratchPool.release();
-            //stepArena.release();
         }
 
 	private:

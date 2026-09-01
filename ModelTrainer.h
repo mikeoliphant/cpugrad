@@ -580,7 +580,7 @@ namespace NeuralCpuTrain
 
 					bufferArena.FreeScratchBuffer(layerOutputGradient);
 
-					bufferArena.Release();
+					bufferArena.ReleaseScratch();
 				}
 
 				totalDuration += (Clock::now() - totalStart);

@@ -340,9 +340,6 @@ private:
 	float headScale = 0.1f;
 };
 
-//using A2KernelSizes = std::integer_sequence<int, 6, 6>;
-//using A2Dilations = std::integer_sequence<int, 1, 3>;
-
 using A2KernelSizes = std::integer_sequence<int, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 15, 15, 6, 6, 6, 6, 6, 6, 6>;
 using A2Dilations = std::integer_sequence<int, 1, 3, 7, 17, 41, 101, 239, 1, 3, 7, 17, 41, 101, 239, 1, 13, 1, 3, 7, 17, 41, 101, 239>;
 
