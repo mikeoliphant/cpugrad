@@ -17,6 +17,8 @@ public:
 		size_t numSamples = input.GetNumCols();
 
 		conv.Reset();
+		if (convOut.GetNumCols() == 0)
+			convOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamples);
 		convOut.SetZero();
 		conv.Forward(input, convOut.Slice(numSamples));
 
@@ -32,6 +34,8 @@ public:
 		trainingContext->GetBufferArena().FreeScratchBuffer(conditionMixInOut);
 
 		relu.Reset();
+		if (reluOut.GetNumCols() == 0)
+			reluOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamples);
 		relu.Forward(convOut.Slice(numSamples), reluOut.Slice(numSamples));
 
 		auto headOutputMap = headOutput.GetEigenMap();
@@ -123,6 +127,8 @@ public:
 	{
 		BackpropModelT<T, Channels, Channels>::SetTrainingContext(context);
 
+
+
 		conv.SetTrainingContext(context);
 		conditionMixIn.SetTrainingContext(context);
 		oneByOne.SetTrainingContext(context);
@@ -130,10 +136,10 @@ public:
 
 private:
 	Conv1DBackpropT<T, Channels, Channels, KernelSize, true, Dilation> conv;
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> convOut;
+	ChannelBufferDynamic<T, Channels> convOut;
 	DenseBackpropT<T, ConditionSize, Channels, false> conditionMixIn;
 	LeakyReLUT<T, Channels> relu;
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> reluOut;
+	ChannelBufferDynamic<T, Channels> reluOut;
 	DenseBackpropT<T, Channels, Channels, true> oneByOne;
 };
 
@@ -162,27 +168,42 @@ public:
 	{
 		size_t numSamples = input.GetNumCols();
 
-		auto headOutputSlice = headOutput.Slice(numSamples);
+		if (headOutput.GetNumCols() == 0)
+		{
+			// Init all of our buffers
+
+			headOutput = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamples);
+			layerArrayRechannelOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamples);
+
+			ForEachIndex<NumLayers>([&](auto layerIndex)
+				{
+					layerOuts[layerIndex] = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamples);
+				});
+		}
 		
-		headOutputSlice.SetZero();
+		headOutput.SetZero();
 
 		layerArrayRechannel.Reset();
-		layerArrayRechannel.Forward(input, layerArrayRechannelOut.Slice(numSamples));
+		layerArrayRechannel.Forward(input, layerArrayRechannelOut);
+
+		if (layerOuts[0].GetNumCols() == 0)
+		{
+		}
 
 		ForEachIndex<NumLayers>([&](auto layerIndex)
 			{
 				if constexpr (layerIndex == 0)
 				{
-					std::get<layerIndex>(layers).Forward(layerArrayRechannelOut.Slice(numSamples), input, layerOuts[layerIndex].Slice(numSamples), headOutputSlice);
+					std::get<layerIndex>(layers).Forward(layerArrayRechannelOut, input, layerOuts[layerIndex], headOutput);
 				}
 				else
 				{
-					std::get<layerIndex>(layers).Forward(layerOuts[layerIndex - 1].Slice(numSamples), input, layerOuts[layerIndex].Slice(numSamples), headOutputSlice);
+					std::get<layerIndex>(layers).Forward(layerOuts[layerIndex - 1], input, layerOuts[layerIndex], headOutput);
 				}
 			});
 
 		headRechannel.Reset();
-		headRechannel.Forward(headOutputSlice, output);
+		headRechannel.Forward(headOutput, output);
 
 		auto outputMap = output.GetEigenMap();
 		outputMap *= headScale;
@@ -195,9 +216,11 @@ public:
 		auto dOutputMap = dOutput.GetEigenMap();
 		dOutputMap *= headScale;
 
-		auto dHeadRechannelOutSlice = dHeadRechannelOut.Slice(numSamples);
-		dHeadRechannelOutSlice.SetZero();
-		headRechannel.Backward(headOutput.Slice(numSamples), dOutput, dHeadRechannelOutSlice);
+		if (dHeadRechannelOut.GetNumCols() == 0)
+			dHeadRechannelOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamples);
+
+		dHeadRechannelOut.SetZero();
+		headRechannel.Backward(headOutput.Slice(numSamples), dOutput, dHeadRechannelOut);
 
 		ChannelBufferDynamic<T, Channels> dLastLayerOut;
 		ChannelBufferDynamic<T, Channels> dTmpLayerOut;
@@ -210,15 +233,15 @@ public:
 
 				if constexpr (layerIndexForward == 0)
 				{
-					std::get<layerIndexBackward>(layers).BackwardNoLayerOutput(layerOuts[layerIndexBackward - 1].Slice(numSamples), input, dHeadRechannelOutSlice, dCurrentLayerOut);
+					std::get<layerIndexBackward>(layers).BackwardNoLayerOutput(layerOuts[layerIndexBackward - 1].Slice(numSamples), input, dHeadRechannelOut, dCurrentLayerOut);
 				}
 				else if constexpr (layerIndexBackward > 0)
 				{
-					std::get<layerIndexBackward>(layers).Backward(layerOuts[layerIndexBackward - 1].Slice(numSamples), input, dLastLayerOut, dHeadRechannelOutSlice, dCurrentLayerOut);
+					std::get<layerIndexBackward>(layers).Backward(layerOuts[layerIndexBackward - 1].Slice(numSamples), input, dLastLayerOut, dHeadRechannelOut, dCurrentLayerOut);
 				}
 				else  // First (last backward) layer
 				{
-					std::get<layerIndexBackward>(layers).Backward(layerArrayRechannelOut.Slice(numSamples), input, dLastLayerOut, dHeadRechannelOutSlice, dCurrentLayerOut);
+					std::get<layerIndexBackward>(layers).Backward(layerArrayRechannelOut.Slice(numSamples), input, dLastLayerOut, dHeadRechannelOut, dCurrentLayerOut);
 				}
 
 				dTmpLayerOut = dLastLayerOut;
@@ -307,13 +330,13 @@ public:
 
 private:
 	DenseBackpropT<T, InOutChannels, Channels, false> layerArrayRechannel;
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> layerArrayRechannelOut;
+	ChannelBufferDynamic<T, Channels> layerArrayRechannelOut;
 
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> layerOuts[NumLayers];
+	ChannelBufferDynamic<T, Channels> layerOuts[NumLayers];
 
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> headOutput;
+	ChannelBufferDynamic<T, Channels> headOutput;
 	Conv1DBackpropT<T, Channels, InOutChannels, 16, true, 1> headRechannel;
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> dHeadRechannelOut;
+	ChannelBufferDynamic<T, Channels> dHeadRechannelOut;
 	float headScale = 0.1f;
 };
 

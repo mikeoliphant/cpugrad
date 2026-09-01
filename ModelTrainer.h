@@ -484,7 +484,7 @@ namespace NeuralCpuTrain
 				modelBackprop(std::make_unique<ModelType>()),
 				lossFunction(),
 				optimizer(),
-				bufferArena(4ULL * 1024 * 1024 * 1024)
+				bufferArena(16 * 1024 * 1024)
 			{
 				this->modelBackprop->SetTrainingContext(this);
 			}
@@ -549,7 +549,7 @@ namespace NeuralCpuTrain
 				auto totalStart = Clock::now();
 
 				for (auto& b : batches)
-				{				
+				{
 					size_t numSamples = b.Size;
 
 					size_t receptiveField = modelBackprop->GetReceptiveField();
