@@ -205,7 +205,7 @@ int main()
 
 	//std::cout << sizeof(A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>) << std::endl;
 
-	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
+	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 8, A2KernelSizes, A2Dilations>>();
 	
 	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
 

@@ -20,7 +20,8 @@ public:
 		convOut.SetZero();
 		conv.Forward(input, convOut.Slice(numSamples));
 
-		auto conditionMixInOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(MAX_BATCH_SIZE);
+		// Doing conditoinMixInOut as a scratch, rather than static is a win for 8channel, but slightly slower for 3channel. mabye a tradeoff with where the buffer is located? better scratch arena could maybe fix
+		auto conditionMixInOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamples);
 
 		conditionMixIn.Reset();
 		conditionMixIn.Forward(condition, conditionMixInOut.Slice(numSamples));
@@ -45,20 +46,20 @@ public:
 
 	void Backward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, ConditionSize>& condition, const ChannelRowSpan<T, Channels>& dOutput, const ChannelRowSpan<T, Channels>& dHeadOutput, const ChannelRowSpan<T, Channels>& dInput)
 	{
+		size_t numSamples = input.GetNumCols();
+
 		// Doing the skip connection first means we don't need to clear dInput
 		auto dInputMap = dInput.GetEigenMap();
 		dInputMap.noalias() = dOutput.GetEigenMapConst();
 
-		size_t numSamples = input.GetNumCols();
-
-		auto dOneByOneOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(MAX_BATCH_SIZE);
+		auto dOneByOneOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamples);
 
 		oneByOne.Backward(reluOut.Slice(numSamples), dOutput, dOneByOneOut.Slice(numSamples));
 
 		auto dOneByOneOutMap = dOneByOneOut.Slice(numSamples).GetEigenMap();
 		dOneByOneOutMap.noalias() += dHeadOutput.GetEigenMapConst();
 
-		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(MAX_BATCH_SIZE);
+		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamples);
 
 		// only need to know if convOut is < 0, so we could store it as a bitmask for better memory/performance
 		relu.Backward(convOut.Slice(numSamples), dOneByOneOut.Slice(numSamples), dReluOut.Slice(numSamples));
@@ -78,7 +79,7 @@ public:
 
 		size_t numSamples = input.GetNumCols();
 
-		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(MAX_BATCH_SIZE);
+		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamples);
 
 		relu.Backward(convOut.Slice(numSamples), dHeadOutput, dReluOut.Slice(numSamples));
 		
