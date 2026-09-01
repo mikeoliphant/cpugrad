@@ -20,11 +20,15 @@ public:
 		convOut.SetZero();
 		conv.Forward(input, convOut.Slice(numSamples));
 
+		auto conditionMixInOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(MAX_BATCH_SIZE);
+
 		conditionMixIn.Reset();
 		conditionMixIn.Forward(condition, conditionMixInOut.Slice(numSamples));
 
 		auto convOutMap = convOut.Slice(numSamples).GetEigenMap();
 		convOutMap.noalias() += conditionMixInOut.Slice(numSamples).GetEigenMapConst();
+
+		trainingContext->GetBufferArena().FreeScratchBuffer(conditionMixInOut);
 
 		relu.Reset();
 		relu.Forward(convOut.Slice(numSamples), reluOut.Slice(numSamples));
@@ -41,7 +45,9 @@ public:
 
 	void Backward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, ConditionSize>& condition, const ChannelRowSpan<T, Channels>& dOutput, const ChannelRowSpan<T, Channels>& dHeadOutput, const ChannelRowSpan<T, Channels>& dInput)
 	{
-		dInput.SetZero();
+		// Doing the skip connection first means we don't need to clear dInput
+		auto dInputMap = dInput.GetEigenMap();
+		dInputMap.noalias() = dOutput.GetEigenMapConst();
 
 		size_t numSamples = input.GetNumCols();
 
@@ -54,6 +60,7 @@ public:
 
 		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(MAX_BATCH_SIZE);
 
+		// only need to know if convOut is < 0, so we could store it as a bitmask for better memory/performance
 		relu.Backward(convOut.Slice(numSamples), dOneByOneOut.Slice(numSamples), dReluOut.Slice(numSamples));
 
 		trainingContext->GetBufferArena().FreeScratchBuffer(dOneByOneOut);
@@ -63,10 +70,6 @@ public:
 		conv.Backward(input, dReluOut.Slice(numSamples), dInput);
 
 		trainingContext->GetBufferArena().FreeScratchBuffer(dReluOut);
-
-		// can avoid clearing dInput if we did this first...
-		auto dInputMap = dInput.GetEigenMap();
-		dInputMap.noalias() += dOutput.GetEigenMapConst();
 	}
 
 	void BackwardNoLayerOutput(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, ConditionSize>& condition, const ChannelRowSpan<T, Channels>& dHeadOutput, const ChannelRowSpan<T, Channels>& dInput)
@@ -128,7 +131,6 @@ private:
 	Conv1DBackpropT<T, Channels, Channels, KernelSize, true, Dilation> conv;
 	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> convOut;
 	DenseBackpropT<T, ConditionSize, Channels, false> conditionMixIn;
-	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> conditionMixInOut;
 	LeakyReLUT<T, Channels> relu;
 	ChannelBuffer<T, Channels, MAX_BATCH_SIZE> reluOut;
 	DenseBackpropT<T, Channels, Channels, true> oneByOne;
