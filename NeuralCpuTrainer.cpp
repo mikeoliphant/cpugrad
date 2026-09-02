@@ -120,7 +120,7 @@ int main()
 
 	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
 
-	modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
+	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
 
 	//modelTrainer->TrainIdentity(sinData);
 

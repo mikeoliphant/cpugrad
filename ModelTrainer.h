@@ -175,7 +175,7 @@ namespace NeuralCpuTrain
 			{
 				for (int w = 0; w < 8; w++)
 				{
-					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType>>());
+					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>());
 				}
 				
 				mainWorker = modelTrainerWorkers[0].get();
@@ -384,16 +384,6 @@ namespace NeuralCpuTrain
 
 					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
-					std::cout << "Epoch: " << epoch << " " << std::format("{:.2f}", epochTime) << "s LR: " << learningRate << " " << lossFunction.GetName() << ": " << std::format("{:.10f}", err);
-					
-					if (lossEvalFunction.GetName() != lossFunction.GetName())
-					{
-						err = lossEvalFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
-						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.10f}", err);
-					}
-
-					std::cout << std::endl;
-
 					if (epoch == 0)
 					{
 						double trainTime = std::chrono::duration<double>(trainDuration).count();
@@ -406,6 +396,16 @@ namespace NeuralCpuTrain
 
 						std::cout << "Thread - Forward: " << threadForwardTime << " Back: " << threadBackTime << " Other: " << (threadTotalTime - threadForwardTime - threadBackTime) << std::endl;
 					}
+
+					std::cout << "Epoch: " << epoch << " " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction.GetName() << ": " << std::format("{:.8f}", err);
+					
+					if (lossEvalFunction.GetName() != lossFunction.GetName())
+					{
+						err = lossEvalFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
+						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.8f}", err);
+					}
+
+					std::cout << std::endl;
 
 					learningRate *= learningRateDecay;
 				}
