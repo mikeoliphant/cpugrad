@@ -195,31 +195,32 @@ namespace NeuralCpuTrain
 
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
 			{
+				size_t outputSize = 8192;
 				size_t receptiveField = modelBackprop->GetReceptiveField();
-				size_t maxForwardSize = MAX_BATCH_SIZE - receptiveField;
+				size_t batchSize = outputSize + receptiveField;
 				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
+
+				auto forwardSlice = forwardOutput.Slice(outputSize);
 
 				while (currentOffset < totalSamples)
 				{
 					size_t samplesRemaining = totalSamples - currentOffset;
 
-					size_t forwardSize = std::min(maxForwardSize, samplesRemaining);
-					size_t thisBatchSize = forwardSize + receptiveField;
 					size_t trainingStart = currentOffset - receptiveField;
 
 					T* batchInPtr = batchInput.GetData();
-					std::copy(input + trainingStart, input + trainingStart + thisBatchSize, batchInPtr);
 
-					forwardOutput.SetZero();
+					std::copy(input + trainingStart, input + trainingStart + receptiveField + std::min(outputSize, samplesRemaining), batchInPtr);
 
-					modelBackprop->Reset();
+					forwardSlice.SetZero();
 
-					modelBackprop->Forward(batchInput.Slice(thisBatchSize), forwardOutput.Slice(thisBatchSize));
+					modelBackprop->Forward(batchInput.Slice(batchSize), forwardSlice);
 
-					T* forwardOutputPtr = forwardOutput.GetData();
-					std::copy(forwardOutputPtr + receptiveField, forwardOutputPtr + thisBatchSize, output + currentOffset);
+					size_t toCopy = std::min(outputSize, samplesRemaining);
+					T* forwardOutputPtr = forwardSlice.GetData();
+					std::copy(forwardOutputPtr, forwardOutputPtr + toCopy, output + currentOffset);
 
-					currentOffset += forwardSize;
+					currentOffset += outputSize;
 				}
 			}
 
@@ -246,8 +247,6 @@ namespace NeuralCpuTrain
 
 				forwardOutput.SetZero();
 
-				modelBackprop->Reset();
-
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
 
 				double upErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / static_cast<double>(numSamples - receptiveField);
@@ -255,8 +254,6 @@ namespace NeuralCpuTrain
 				*weightPtr = originalWeight - (T)delta;
 
 				forwardOutput.SetZero();
-
-				modelBackprop->Reset();
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
 
@@ -266,7 +263,6 @@ namespace NeuralCpuTrain
 
 				forwardOutput.SetZero();
 
-				modelBackprop->Reset();
 				mainWorker->GetOptimizer().ResetGradients();
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
@@ -484,7 +480,7 @@ namespace NeuralCpuTrain
 				modelBackprop(std::make_unique<ModelType>()),
 				lossFunction(),
 				optimizer(),
-				bufferArena(16 * 1024 * 1024)
+				bufferArena()
 			{
 				this->modelBackprop->SetTrainingContext(this);
 			}
@@ -553,6 +549,7 @@ namespace NeuralCpuTrain
 					size_t numSamples = b.Size;
 
 					size_t receptiveField = modelBackprop->GetReceptiveField();
+					size_t outputSize = numSamples - receptiveField;
 
 					float* batchInPtr = batchInput.GetData();
 					std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
@@ -560,22 +557,25 @@ namespace NeuralCpuTrain
 					auto batchTargetPtr = batchTarget.GetData();
 					std::copy(target + b.Offset, target + b.Offset + numSamples, batchTargetPtr);
 
-					forwardOutput.SetZero();
-
-					modelBackprop->Reset();
+					auto forwardSlice = forwardOutput.Slice(0, outputSize);
+					forwardSlice.SetZero();
 
 					auto forwardStart = Clock::now();
-					modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+					modelBackprop->Forward(batchInput.Slice(numSamples), forwardSlice);
 					forwardDuration += (Clock::now() - forwardStart);
 
-					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), numSamples, receptiveField, lossScale);
+					auto outputGradientSlice = outputGradient.Slice(0, outputSize);
+					auto batchTargetSlice = batchTarget.Slice(receptiveField, outputSize);
 
-					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / (float)(numSamples - receptiveField) << std::endl;
+					lossFunction.ComputeLoss(forwardSlice.GetDataConst(), batchTargetSlice.GetDataConst(), outputGradientSlice.GetData(), outputSize, 0, lossScale);
 
+					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardSlice.GetDataConst(), batchTargetSlice.GetDataConst(), outputSize, 0) / (float)outputSize << std::endl;
+
+					// Really shouldn't need this
 					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(MAX_BATCH_SIZE);
 
 					auto backStart = Clock::now();
-					modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(numSamples), layerOutputGradient.Slice(numSamples));
+					modelBackprop->Backward(batchInput.Slice(numSamples), outputGradientSlice, layerOutputGradient.Slice(numSamples));
 					backDuration += (Clock::now() - backStart);
 
 					bufferArena.FreeScratchBuffer(layerOutputGradient);

@@ -91,9 +91,6 @@ namespace NeuralCpuTrain
 				(void)inWeights;
 			}
 
-			virtual void Reset()
-			{}
-
 			virtual void AddWeightGradients()
 			{
 			}
@@ -199,6 +196,8 @@ namespace NeuralCpuTrain
 
 			void Forward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& output) override
 			{
+				assert(input.GetNumCols() == output.GetNumCols());
+
 				if constexpr (DoBias)
 				{
 					output.GetEigenMap().noalias() = (weights.GetEigenMapConst() * input.GetEigenMapConst()).colwise() + bias;
@@ -213,11 +212,9 @@ namespace NeuralCpuTrain
 				const ChannelRowSpan<T, OutChannels>& dOutput,
 				const ChannelRowSpan<T, InChannels>& dInput) override
 			{
+				assert((input.GetNumCols() == dOutput.GetNumCols()) && (input.GetNumCols() == dInput.GetNumCols()));
+
 				dInput.GetEigenMap().noalias() = weights.GetEigenMapConst().transpose() * dOutput.GetEigenMapConst();
-
-				//auto map = dWeights.GetEigenMap();
-
-				//map.noalias() += dOutput.GetEigenMapConst() * input.GetEigenMapConst().transpose();
 
 				ComputeDW(dOutput.GetDataConst(), input.GetDataConst(), dWeights.GetData(), dOutput.GetNumCols());
 
@@ -230,6 +227,8 @@ namespace NeuralCpuTrain
 			void BackwardNoDInput(const ChannelRowSpan<T, InChannels>& input,
 				const ChannelRowSpan<T, OutChannels>& dOutput) override
 			{
+				assert(input.GetNumCols() == dOutput.GetNumCols());
+
 				ComputeDW(dOutput.GetDataConst(), input.GetDataConst(), dWeights.GetData(), dOutput.GetNumCols());
 
 				if constexpr (DoBias)
@@ -291,18 +290,18 @@ namespace NeuralCpuTrain
 
 			void Forward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& output) override
 			{
-				const size_t numFrames = input.GetNumCols();
+				assert(input.GetNumCols() == (output.GetNumCols() + GetReceptiveField()));
+
+				const size_t numSamplesOut = output.GetNumCols();
 
 				for (size_t k = 0; k < KernelSize; k++)
 				{
-					const int offset = Dilation * (int)(KernelSize - k - 1);
+					const int inputOffset = Dilation * (int)k;
 
-					const size_t validSize = numFrames - offset;
+					const auto inBlock = input.Slice(inputOffset, numSamplesOut);
+					auto outBlock = output.GetEigenMap();
 
-					const auto inBlock = input.Slice(0, validSize);
-					const auto outBlock = output.Slice(offset, validSize);
-
-					outBlock.GetEigenMap().noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
+					outBlock.noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
 				}
 
 				if constexpr (DoBias)
@@ -311,7 +310,10 @@ namespace NeuralCpuTrain
 
 			void Backward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& dOutput, const ChannelRowSpan<T, InChannels>& dInput) override
 			{
-				const size_t numFrames = dOutput.GetNumCols();
+				assert(input.GetNumCols() == (dOutput.GetNumCols() + GetReceptiveField()));
+				assert(input.GetNumCols() == dInput.GetNumCols());
+
+				const size_t numSamplesOut = dOutput.GetNumCols();
 				const auto doutMap = dOutput.GetEigenMapConst();
 				
 				if constexpr (DoBias)
@@ -321,22 +323,15 @@ namespace NeuralCpuTrain
 
 				for (size_t k = 0; k < KernelSize; ++k)
 				{
-					const int offset = Dilation * (int)(KernelSize - k - 1);
+					const int inputOffset = Dilation * (int)k;
 
-					const size_t validSize = numFrames - offset;
+					const auto inBlock = input.Slice(inputOffset, numSamplesOut);
 
-					const auto inBlock = input.Slice(0, validSize);
-					const auto dOutputBlock = dOutput.Slice(offset, validSize);
-
-					//auto dwMap = dWeights[k].GetEigenMap();
-
-					//dwMap.noalias() += dOutputBlock.GetEigenMapConst() * inBlock.GetEigenMapConst().transpose();
-
-					ComputeDW(dOutputBlock.GetDataConst(), inBlock.GetDataConst(), dWeights[k].GetData(), validSize);
+					ComputeDW(dOutput.GetDataConst(), inBlock.GetDataConst(), dWeights[k].GetData(), numSamplesOut);
 
 					auto wMap = weights[k].GetEigenMapConst();
-					auto dInputMap = dInput.Slice(0, validSize).GetEigenMap();
-					dInputMap.noalias() += wMap.transpose() * dOutputBlock.GetEigenMapConst();
+					auto dInputMap = dInput.Slice(inputOffset, numSamplesOut).GetEigenMap();
+					dInputMap.noalias() += wMap.transpose() * dOutput.GetEigenMapConst();
 				}
 			}
 
@@ -405,6 +400,8 @@ namespace NeuralCpuTrain
 		public:
 			void Forward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, Channels>& output) override
 			{
+				assert(input.GetNumCols() == output.GetNumCols());
+
 				auto outputMap = output.GetEigenMap();
 				auto inputMap = input.GetEigenMapConst();
 
@@ -413,6 +410,9 @@ namespace NeuralCpuTrain
 
 			void Backward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, Channels>& dOutput, const ChannelRowSpan<T, Channels>& dInput) override
 			{
+				assert(input.GetNumCols() == dOutput.GetNumCols());
+				assert(input.GetNumCols() == dInput.GetNumCols());
+
 				auto inputMap = input.GetEigenMapConst();
 				auto dOutputMap = dOutput.GetEigenMapConst();
 				auto dInputMap = dInput.GetEigenMap();

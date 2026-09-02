@@ -21,7 +21,7 @@ template <typename T>
 class BatchBufferArenaT
 {
 	public:
-        explicit BatchBufferArenaT(size_t maxCapacity) :
+        explicit BatchBufferArenaT() :
             stepArena(),
             scratchPool()
         {

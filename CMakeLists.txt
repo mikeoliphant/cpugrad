@@ -19,8 +19,6 @@ else()
 	)
 endif()
 
-
-
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
 	add_compile_options(/arch:AVX2 /fp:fast)
 	message(STATUS "Enabling /arch:AVX2")		 
@@ -28,6 +26,8 @@ else()
 	add_compile_options(-march=x86-64-v3)
 	message(STATUS "Enabling -march=x86-64-v3")
 endif()
+
+set(BUILD_NAMCORE OFF CACHE BOOL "") 
 
 add_subdirectory(deps/NeuralAudio NeuralAudio)
 
@@ -38,7 +38,8 @@ set(SOURCES
 	Dataset.h
 	Optimizer.h
 	BatchBuffer.h
-	NAM.h)
+	NAM.h
+	Tests.h)
 
 add_executable(NeuralCpuTrainer ${SOURCES})
 target_include_directories(NeuralCpuTrainer PUBLIC deps/NeuralAudio/NeuralAudio)
