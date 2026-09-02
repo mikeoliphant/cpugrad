@@ -232,6 +232,7 @@ namespace NeuralCpuTrain
 				modelBackprop->RandomizeWeights();
 
 				size_t receptiveField = modelBackprop->GetReceptiveField();
+				size_t outputSize = numSamples - receptiveField;
 
 				float* batchInPtr = batchInput.GetData();
 				std::copy(input, input + numSamples, batchInPtr);
@@ -245,33 +246,34 @@ namespace NeuralCpuTrain
 
 				*weightPtr = originalWeight + (T)delta;
 
-				forwardOutput.SetZero();
+				auto forwardOutputSlice = forwardOutput.Slice(outputSize);
+				forwardOutputSlice.SetZero();
 
-				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutputSlice);
 
-				double upErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / static_cast<double>(numSamples - receptiveField);
+				double upErr = lossFunction.GetTotSquared(forwardOutputSlice.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
 
 				*weightPtr = originalWeight - (T)delta;
 
-				forwardOutput.SetZero();
+				forwardOutputSlice.SetZero();
 
-				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutputSlice.Slice(outputSize));
 
-				double downErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), numSamples, receptiveField) / static_cast<double>(numSamples - receptiveField);
+				double downErr = lossFunction.GetTotSquared(forwardOutputSlice.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
 
 				*weightPtr = originalWeight;
 
-				forwardOutput.SetZero();
+				forwardOutputSlice.SetZero();
 
 				mainWorker->GetOptimizer().ResetGradients();
 
-				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(numSamples));
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutputSlice);
 
-				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), numSamples, receptiveField, 1.0f);
+				lossFunction.ComputeLoss(forwardOutputSlice.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 0, 1.0f);
 
-				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(numSamples), layerOutputGradient.Slice(numSamples));
+				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(outputSize), layerOutputGradient.Slice(numSamples));
 
-				double numGrad = (upErr - downErr) / (2.0 * delta); 
+				double numGrad = (upErr - downErr) / (2.0 * delta);
 
 				double relErr = (*dWeightPtr - numGrad) / std::max({ std::abs((double)*dWeightPtr), std::abs(numGrad), 1e-8 });
 

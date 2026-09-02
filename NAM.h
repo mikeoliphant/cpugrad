@@ -258,7 +258,7 @@ public:
 				}
 			});
 
-		layerArrayRechannel.Backward(input, dLastLayerOut, dInput);
+		layerArrayRechannel.BackwardNoDInput(input, dLastLayerOut);	// skip dInput gradient calculation since it isn't used
 
 		trainingContext->GetBufferArena().FreeScratchBuffer(dLastLayerOut);
 	}

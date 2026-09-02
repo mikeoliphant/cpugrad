@@ -79,7 +79,7 @@ int main()
 
 	//auto denseTrainer = new ModelTrainerT<float, DenseBackpropT<float, 1, 1, false>>();
 
-	//denseTrainer->TestBackprop(0, randData.data(), randData.data(), 16000);
+	//denseTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
 
 	//denseTrainer->TrainIdentity(randData);
 
@@ -119,8 +119,8 @@ int main()
 	//std::cout << sizeof(A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>) << std::endl;
 
 	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
-	
-	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
+
+	modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
 
 	//modelTrainer->TrainIdentity(sinData);
 

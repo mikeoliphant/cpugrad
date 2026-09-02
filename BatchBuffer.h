@@ -55,7 +55,7 @@ class BatchBufferArenaT
         }
 
 	private:
-        std::pmr::monotonic_buffer_resource stepArena; // data that persists for a training step (ie: forward pass intermediate outputs)
+        std::pmr::monotonic_buffer_resource stepArena; // data that persists (ie: forward pass intermediate outputs)
         std::pmr::unsynchronized_pool_resource scratchPool; // temporary data (forward pass scratch buffers and backward gradient buffers)
 
 };
