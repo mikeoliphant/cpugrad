@@ -551,31 +551,47 @@ namespace NeuralCpuTrain
 					size_t receptiveField = modelBackprop->GetReceptiveField();
 					size_t outputSize = numSamples - receptiveField;
 
+					if (batchInput.GetNumCols() == 0)
+					{
+						batchInput = bufferArena.template GetBuffer<1>(numSamples);
+					}
+
 					float* batchInPtr = batchInput.GetData();
 					std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
 
-					auto batchTargetPtr = batchTarget.GetData();
-					std::copy(target + b.Offset, target + b.Offset + numSamples, batchTargetPtr);
+					if (batchTarget.GetNumCols() == 0)
+					{
+						batchTarget = bufferArena.template GetBuffer<1>(outputSize);
+					}
 
-					auto forwardSlice = forwardOutput.Slice(0, outputSize);
-					forwardSlice.SetZero();
+					auto batchTargetPtr = batchTarget.GetData();
+					std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
+
+					if (forwardOutput.GetNumCols() == 0)
+					{
+						forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
+					}
+
+					forwardOutput.SetZero();
 
 					auto forwardStart = Clock::now();
-					modelBackprop->Forward(batchInput.Slice(numSamples), forwardSlice);
+					modelBackprop->Forward(batchInput, forwardOutput);
 					forwardDuration += (Clock::now() - forwardStart);
 
-					auto outputGradientSlice = outputGradient.Slice(0, outputSize);
-					auto batchTargetSlice = batchTarget.Slice(receptiveField, outputSize);
+					if (outputGradient.GetNumCols() == 0)
+					{
+						outputGradient = bufferArena.template GetBuffer<1>(outputSize);
+					}
 
-					lossFunction.ComputeLoss(forwardSlice.GetDataConst(), batchTargetSlice.GetDataConst(), outputGradientSlice.GetData(), outputSize, 0, lossScale);
+					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, 0, lossScale);
 
 					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardSlice.GetDataConst(), batchTargetSlice.GetDataConst(), outputSize, 0) / (float)outputSize << std::endl;
 
 					// Really shouldn't need this
-					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(MAX_BATCH_SIZE);
+					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
 
 					auto backStart = Clock::now();
-					modelBackprop->Backward(batchInput.Slice(numSamples), outputGradientSlice, layerOutputGradient.Slice(numSamples));
+					modelBackprop->Backward(batchInput, outputGradient, layerOutputGradient);
 					backDuration += (Clock::now() - backStart);
 
 					bufferArena.FreeScratchBuffer(layerOutputGradient);
@@ -592,11 +608,10 @@ namespace NeuralCpuTrain
 			LossType lossFunction;
 			AdamOptimizerT<T> optimizer;
 			BatchBufferArenaT<T> bufferArena;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchInput;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchTarget;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> forwardOutput;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> outputGradient;
-			//ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
+			ChannelBufferDynamic<float, 1> batchInput;
+			ChannelBufferDynamic<float, 1> batchTarget;
+			ChannelBufferDynamic<float, 1> forwardOutput;
+			ChannelBufferDynamic<float, 1> outputGradient;
 			Clock::duration forwardDuration = Clock::duration::zero();
 			Clock::duration backDuration = Clock::duration::zero();
 			Clock::duration totalDuration = Clock::duration::zero();
