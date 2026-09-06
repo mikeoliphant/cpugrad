@@ -57,27 +57,23 @@ public:
 		dInputValidMap.noalias() = dOutput.GetEigenMapConst();
 		dInput.Slice(0, inputOffset).SetZero(); // clear receptive field samples
 
-		auto dOneByOneOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamplesOut);
+		auto scratch = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamplesOut);
 
-		headRechannel.Backward(reluOut, dOutput, dOneByOneOut);
+		headRechannel.Backward(reluOut, dOutput, scratch);
 
 		const size_t headOutputSize = dHeadOutput.GetNumCols();	// dHeadOutput is always smaller
-		auto dOneByOneOutMap = dOneByOneOut.Slice(numSamplesOut - headOutputSize, headOutputSize).GetEigenMap();
+		auto dOneByOneOutMap = scratch.Slice(numSamplesOut - headOutputSize, headOutputSize).GetEigenMap();
 		dOneByOneOutMap.noalias() += dHeadOutput.GetEigenMapConst();
 
-		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamplesOut);
-
 		// only need to know if convOut is < 0, so we could store it as a bitmask for better memory/performance
-		relu.Backward(convOut, dOneByOneOut, dReluOut);
-
-		trainingContext->GetBufferArena().FreeScratchBuffer(dOneByOneOut);
+		relu.Backward(convOut, scratch, scratch);	// relu can be done in place
 
 		size_t conditionOffset = condition.GetNumCols() - numSamplesOut;
-		conditionMixIn.BackwardNoDInput(condition.Slice(conditionOffset, numSamplesOut), dReluOut);
+		conditionMixIn.BackwardNoDInput(condition.Slice(conditionOffset, numSamplesOut), scratch);
 
-		conv.Backward(input, dReluOut, dInput);
+		conv.Backward(input, scratch, dInput);
 
-		trainingContext->GetBufferArena().FreeScratchBuffer(dReluOut);
+		trainingContext->GetBufferArena().FreeScratchBuffer(scratch);
 	}
 
 	void BackwardNoLayerOutput(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, ConditionSize>& condition, const ChannelRowSpan<T, Channels>& dHeadOutput, const ChannelRowSpan<T, Channels>& dInput)
