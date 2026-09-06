@@ -195,89 +195,12 @@ namespace NeuralCpuTrain
 
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
 			{
-				size_t outputSize = 8192;
-				size_t receptiveField = modelBackprop->GetReceptiveField();
-				size_t batchSize = outputSize + receptiveField;
-				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
-
-				auto forwardSlice = forwardOutput.Slice(outputSize);
-
-				while (currentOffset < totalSamples)
-				{
-					size_t samplesRemaining = totalSamples - currentOffset;
-
-					size_t trainingStart = currentOffset - receptiveField;
-
-					T* batchInPtr = batchInput.GetData();
-
-					std::copy(input + trainingStart, input + trainingStart + receptiveField + std::min(outputSize, samplesRemaining), batchInPtr);
-
-					forwardSlice.SetZero();
-
-					modelBackprop->Forward(batchInput.Slice(batchSize), forwardSlice);
-
-					size_t toCopy = std::min(outputSize, samplesRemaining);
-					T* forwardOutputPtr = forwardSlice.GetData();
-					std::copy(forwardOutputPtr, forwardOutputPtr + toCopy, output + currentOffset);
-
-					currentOffset += outputSize;
-				}
+				mainWorker->VerifyModel(input, output, totalSamples);
 			}
 
 			void TestBackprop(size_t weightIndex, const T* input, T* target, const size_t numSamples)
 			{
-				T* weightPtr = mainWorker->GetOptimizer().GetWeightPtr(weightIndex);
-				T* dWeightPtr = mainWorker->GetOptimizer().GetDWeightPtr(weightIndex);
-
-				modelBackprop->RandomizeWeights();
-
-				size_t receptiveField = modelBackprop->GetReceptiveField();
-				size_t outputSize = numSamples - receptiveField;
-
-				float* batchInPtr = batchInput.GetData();
-				std::copy(input, input + numSamples, batchInPtr);
-
-				auto batchTargetPtr = batchTarget.GetData();
-				std::copy(target, target + numSamples, batchTargetPtr);
-
-				double delta = 0.001;
-
-				T originalWeight = *weightPtr;
-
-				*weightPtr = originalWeight + (T)delta;
-
-				auto forwardOutputSlice = forwardOutput.Slice(outputSize);
-				forwardOutputSlice.SetZero();
-
-				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutputSlice);
-
-				double upErr = lossFunction.GetTotSquared(forwardOutputSlice.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
-
-				*weightPtr = originalWeight - (T)delta;
-
-				forwardOutputSlice.SetZero();
-
-				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutputSlice.Slice(outputSize));
-
-				double downErr = lossFunction.GetTotSquared(forwardOutputSlice.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
-
-				*weightPtr = originalWeight;
-
-				forwardOutputSlice.SetZero();
-
-				mainWorker->GetOptimizer().ResetGradients();
-
-				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutputSlice);
-
-				lossFunction.ComputeLoss(forwardOutputSlice.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 0, 1.0f);
-
-				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(outputSize), layerOutputGradient.Slice(numSamples));
-
-				double numGrad = (upErr - downErr) / (2.0 * delta);
-
-				double relErr = (*dWeightPtr - numGrad) / std::max({ std::abs((double)*dWeightPtr), std::abs(numGrad), 1e-8 });
-
-				std::cout << "DWeight: " << *dWeightPtr << " NumGrad: " << numGrad << " RelErr: " << relErr << std::endl;
+				mainWorker->TestBackprop(weightIndex, input, target, numSamples);
 			}
 
 			void TrainModel(const T* input, T* target, const size_t trainingSamples, const T* verifyInput, const T* verifyTarget, const size_t verifySamples)
@@ -440,7 +363,7 @@ namespace NeuralCpuTrain
 				TrainModel(dataPair.first.data(), dataPair.second.data(), numSamples - verifySamples, dataPair.first.data() + verifySamples, dataPair.second.data() + verifySamples, verifySamples);
 			}
 
-			void TestWav(const std::filesystem::path inWavePath, const std::filesystem::path targetWavePath)
+			void TrainWav(const std::filesystem::path inWavePath, const std::filesystem::path targetWavePath)
 			{
 				unsigned int channels;
 				unsigned int sampleRate;
@@ -467,11 +390,6 @@ namespace NeuralCpuTrain
 			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
 			TrainerWorkerT<T, ModelType>* mainWorker;
 			ModelType* modelBackprop;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchInput;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> batchTarget;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> forwardOutput;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> outputGradient;
-			ChannelBuffer<float, 1, MAX_BATCH_SIZE> layerOutputGradient;
 			LossType lossFunction;
 			LossEvalType lossEvalFunction;
 	};
@@ -605,6 +523,121 @@ namespace NeuralCpuTrain
 
 				totalDuration += (Clock::now() - totalStart);
 			}
+
+			void VerifyModel(const T* input, T* output, const size_t totalSamples)
+			{
+				size_t outputSize = 8192;
+				size_t receptiveField = modelBackprop->GetReceptiveField();
+				size_t batchSize = outputSize + receptiveField;
+				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
+
+				if (forwardOutput.GetNumCols() == 0)
+				{
+					forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
+				}
+
+				if (batchInput.GetNumCols() == 0)
+				{
+					batchInput = bufferArena.template GetBuffer<1>(batchSize);
+				}
+
+				while (currentOffset < totalSamples)
+				{
+					size_t samplesRemaining = totalSamples - currentOffset;
+
+					size_t trainingStart = currentOffset - receptiveField;
+
+					T* batchInPtr = batchInput.GetData();
+
+					std::copy(input + trainingStart, input + trainingStart + receptiveField + std::min(outputSize, samplesRemaining), batchInPtr);
+
+					forwardOutput.SetZero();
+
+					modelBackprop->Forward(batchInput, forwardOutput);
+
+					size_t toCopy = std::min(outputSize, samplesRemaining);
+					T* forwardOutputPtr = forwardOutput.GetData();
+					std::copy(forwardOutputPtr, forwardOutputPtr + toCopy, output + currentOffset);
+
+					currentOffset += outputSize;
+				}
+			}
+
+			void TestBackprop(size_t weightIndex, const T* input, T* target, const size_t numSamples)
+			{
+				T* weightPtr = optimizer.GetWeightPtr(weightIndex);
+				T* dWeightPtr = optimizer.GetDWeightPtr(weightIndex);
+
+				modelBackprop->RandomizeWeights();
+
+				size_t receptiveField = modelBackprop->GetReceptiveField();
+				size_t outputSize = numSamples - receptiveField;
+
+				if (forwardOutput.GetNumCols() == 0)
+				{
+					forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
+				}
+
+				if (batchInput.GetNumCols() == 0)
+				{
+					batchInput = bufferArena.template GetBuffer<1>(numSamples);
+				}
+
+				if (batchTarget.GetNumCols() == 0)
+				{
+					batchTarget = bufferArena.template GetBuffer<1>(outputSize);
+				}
+
+				float* batchInPtr = batchInput.GetData();
+				std::copy(input, input + numSamples, batchInPtr);
+
+				auto batchTargetPtr = batchTarget.GetData();
+				std::copy(target, target + numSamples, batchTargetPtr);
+
+				double delta = 0.001;
+
+				T originalWeight = *weightPtr;
+
+				*weightPtr = originalWeight + (T)delta;
+
+				forwardOutput.SetZero();
+
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput);
+
+				double upErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
+
+				*weightPtr = originalWeight - (T)delta;
+
+				forwardOutput.SetZero();
+
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(outputSize));
+
+				double downErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
+
+				*weightPtr = originalWeight;
+
+				forwardOutput.SetZero();
+
+				optimizer.ResetGradients();
+
+				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput);
+
+				if (outputGradient.GetNumCols() == 0)
+				{
+					outputGradient = bufferArena.template GetBuffer<1>(outputSize);
+				}
+
+				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 0, 1.0f);
+
+				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(outputSize), forwardOutput.Slice(numSamples));
+
+				double numGrad = (upErr - downErr) / (2.0 * delta);
+
+				double relErr = (*dWeightPtr - numGrad) / std::max({ std::abs((double)*dWeightPtr), std::abs(numGrad), 1e-8 });
+
+				std::cout << "DWeight: " << *dWeightPtr << " NumGrad: " << numGrad << " RelErr: " << relErr << std::endl;
+			}
+
 
 		private:
 			std::vector<TrainingDataBatch> batches;

@@ -116,7 +116,7 @@ int main()
 	//auto a2 = new A2BackpropT<float, 1, 3, TestKernelSizes, TestDilations>();
 	//auto a2 = new ();
 
-	//std::cout << sizeof(A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>) << std::endl;
+	//std::cout << sizeof(A2BackpropT<float, 1, 8, A2KernelSizes, A2Dilations>) << std::endl;
 
 	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 8, A2KernelSizes, A2Dilations>>();
 
@@ -124,7 +124,7 @@ int main()
 
 	//modelTrainer->TrainIdentity(sinData);
 
-	modelTrainer->TestWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
+	modelTrainer->TrainWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
 
 	//ChainBackpropModelT<float, 1, 1> chainBackProp;
 
