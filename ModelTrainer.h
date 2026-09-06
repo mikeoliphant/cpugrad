@@ -378,7 +378,9 @@ namespace NeuralCpuTrain
 						worker->AddDurations(threadTotalDuration, threadForwardDuration, threadBackDuration);
 					}
 
+					auto verifyStart = Clock::now();
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
+					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
 					double err = lossFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
 
@@ -388,7 +390,7 @@ namespace NeuralCpuTrain
 					{
 						double trainTime = std::chrono::duration<double>(trainDuration).count();
 
-						std::cout << "Train: " << trainTime << " Other: " << (epochTime - trainTime) << std::endl;
+						std::cout << "Train: " << trainTime << " Verify: " << verifyTime << " Other: " << (epochTime - trainTime - verifyTime) << std::endl;
 
 						double threadTotalTime = std::chrono::duration<double>(threadTotalDuration).count();
 						double threadForwardTime = std::chrono::duration<double>(threadForwardDuration).count();
