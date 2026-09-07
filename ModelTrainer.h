@@ -213,9 +213,6 @@ namespace NeuralCpuTrain
 				size_t trainingSize = 8192;
 				size_t receptiveField = modelBackprop->GetReceptiveField();
 
-				if ((trainingSize + receptiveField) > MAX_BATCH_SIZE)
-					throw std::runtime_error("MAX_BATCH_SIZE is too small");
-
 				TrainingData trainingData(trainingSamples, trainingSize, receptiveField);
 
 				size_t miniBatchSize = 16;

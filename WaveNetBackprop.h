@@ -6,8 +6,6 @@
 #include "ChannelBuffer.h"
 #include "Optimizer.h"
 
-#define MAX_BATCH_SIZE 14538
-
 using namespace NeuralAudio;
 
 namespace NeuralCpuTrain
@@ -321,13 +319,19 @@ namespace NeuralCpuTrain
 					dBias.noalias() += doutMap.rowwise().sum();
 				}
 
-				for (size_t k = 0; k < KernelSize; ++k)
+				for (size_t k = 0; k < KernelSize; k++)
 				{
 					const int inputOffset = Dilation * (int)k;
 
 					const auto inBlock = input.Slice(inputOffset, numSamplesOut);
 
 					ComputeDW(dOutput.GetDataConst(), inBlock.GetDataConst(), dWeights[k].GetData(), numSamplesOut);
+				}
+
+				// It is faster to do two loops, since the memory regions are separate
+				for (size_t k = 0; k < KernelSize; k++)
+				{
+					const int inputOffset = Dilation * (int)k;
 
 					auto wMap = weights[k].GetEigenMapConst();
 					auto dInputMap = dInput.Slice(inputOffset, numSamplesOut).GetEigenMap();
