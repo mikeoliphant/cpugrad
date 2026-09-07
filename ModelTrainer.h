@@ -9,6 +9,7 @@
 
 #include "WaveNetBackprop.h"
 #include "BatchBuffer.h"
+#include "ThreadAffinity.h"
 #include "Optimizer.h"
 
 namespace NeuralCpuTrain
@@ -173,9 +174,13 @@ namespace NeuralCpuTrain
 				lossFunction(),
 				lossEvalFunction()
 			{
-				for (int w = 0; w < 8; w++)
+				auto numCores = ThreadAffinityManager::GetPhysicalCoreCount();
+
+				std::cout << numCores << " physical cores detected" << std::endl;
+
+				for (int w = 0; w < numCores; w++)
 				{
-					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>());
+					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>((uint32_t)w));
 				}
 				
 				mainWorker = modelTrainerWorkers[0].get();
@@ -395,7 +400,8 @@ namespace NeuralCpuTrain
 	class TrainerWorkerT : public TrainingContextT<T>
 	{
 		public:
-			TrainerWorkerT() :
+			TrainerWorkerT(uint32_t coreID) :
+				coreID(coreID),
 				modelBackprop(std::make_unique<ModelType>()),
 				lossFunction(),
 				optimizer(),
@@ -460,7 +466,9 @@ namespace NeuralCpuTrain
 			}
 
 			void TrainBatches(const T* input, const T* target, double lossScale)
-			{	
+			{
+				//ThreadAffinityManager::PinCurrentThread(coreID * 2);
+
 				auto totalStart = Clock::now();
 
 				for (auto& b : batches)
@@ -637,6 +645,7 @@ namespace NeuralCpuTrain
 
 
 		private:
+			uint32_t coreID;
 			std::vector<TrainingDataBatch> batches;
 			std::unique_ptr<ModelType> modelBackprop;
 			LossType lossFunction;

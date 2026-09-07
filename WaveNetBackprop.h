@@ -4,6 +4,7 @@
 #include <vector>
 #include <format>
 #include "ChannelBuffer.h"
+#include "MatMul.h"
 #include "Optimizer.h"
 
 using namespace NeuralAudio;
@@ -296,15 +297,27 @@ namespace NeuralCpuTrain
 				{
 					const int inputOffset = Dilation * (int)k;
 
-					const auto inBlock = input.Slice(inputOffset, numSamplesOut);
-					auto outBlock = output.GetEigenMap();
+					if constexpr (MatMul<T, InChannels, OutChannels>::HasKernel())
+					{
+						const T* inputPtr = input.Slice(inputOffset, numSamplesOut).GetDataConst();
+						const T* weightPtr = this->weights[k].GetDataConst();
 
-					outBlock.noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
+						T* outputPtr = output.GetData();
+
+						MatMul<T, InChannels, OutChannels>::MultiplyAccumlulate(inputPtr, outputPtr, weightPtr, numSamplesOut);
+					}
+					else
+					{
+						const auto inBlock = input.Slice(inputOffset, numSamplesOut);
+						auto outBlock = output.GetEigenMap();
+
+						outBlock.noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
+					}
 				}
 
 				if constexpr (DoBias)
 					output.GetEigenMap().colwise() += bias;
-			}	
+			}
 
 			void Backward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& dOutput, const ChannelRowSpan<T, InChannels>& dInput) override
 			{
