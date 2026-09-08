@@ -55,7 +55,9 @@ static void TestNAM(std::filesystem::path modelPath)
 
 	MSELossT<float> mseLoss;
 
-	double err = mseLoss.GetTotSquared(verifyOutput.data(), namOutput.data(), numSamples, modelTrainer->GetReceptiveField()) / (double)(numSamples - modelTrainer->GetReceptiveField());
+	size_t receptiveField = modelTrainer->GetReceptiveField();
+
+	double err = mseLoss.GetTotSquared(verifyOutput.data() + receptiveField, namOutput.data() + receptiveField, numSamples - receptiveField) / (double)(numSamples - receptiveField);
 
 	std::cout << "MSE: " << err << std::endl;
 }
@@ -118,7 +120,7 @@ int main()
 
 	//std::cout << sizeof(A2BackpropT<float, 1, 8, A2KernelSizes, A2Dilations>) << std::endl;
 
-	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 8, A2KernelSizes, A2Dilations>>();
+	auto modelTrainer = new ModelTrainerT<float, A2BackpropT<float, 1, 3, A2KernelSizes, A2Dilations>>();
 
 	//modelTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
 

@@ -21,8 +21,8 @@ namespace NeuralCpuTrain
 		public:
 			virtual ~LossT() = default;
 			virtual std::string& GetName() { return name; }
-			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, double scaleFactor) = 0;
-			virtual double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) = 0;
+			virtual void ComputeLoss(const T* output, const T *target, T* outGradient, size_t numSamples, double scaleFactor) = 0;
+			virtual double GetTotSquared(const T* output, const T* target, size_t numSamples) = 0;
 
 		protected:
 			std::string name;
@@ -37,24 +37,21 @@ namespace NeuralCpuTrain
 				this->name = "MSE";
 			}
 
-			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, double scaleFactor) override
+			void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) override
 			{
-				double scale = scaleFactor / static_cast<double>(numSamples - receptiveFieldSize);
+				double scale = scaleFactor / static_cast<double>(numSamples);
 
 				for (size_t t = 0; t < numSamples; t++)
 				{
-					if (t < receptiveFieldSize)
-						outGradient[t] = 0;
-					else
-						outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
+					outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 				}
 			}
 
-			double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) override
+			double GetTotSquared(const T* output, const T* target, size_t numSamples) override
 			{
 				double tot = 0;
 
-				for (size_t t = receptiveFieldSize; t < numSamples; t++)
+				for (size_t t = 0; t < numSamples; t++)
 				{
 					double diff = static_cast<double>(output[t]) - static_cast<double>(target[t]);
 					tot += (diff * diff);
@@ -75,11 +72,11 @@ namespace NeuralCpuTrain
 			this->name = "ESR";
 		}
 
-		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, size_t receptiveFieldSize, double scaleFactor) override
+		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) override
 		{
 			double totEnergy = 0;
 
-			for (size_t t = receptiveFieldSize; t < numSamples; t++)
+			for (size_t t = 0; t < numSamples; t++)
 			{
 				totEnergy += (target[t] * target[t]);
 			}
@@ -90,18 +87,15 @@ namespace NeuralCpuTrain
 
 			for (size_t t = 0; t < numSamples; t++)
 			{
-				if (t < receptiveFieldSize)
-					outGradient[t] = 0;
-				else
-					outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
+				outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 			}
 		}
 
-		double GetTotSquared(const T* output, const T* target, size_t numSamples, size_t receptiveFieldSize) override
+		double GetTotSquared(const T* output, const T* target, size_t numSamples) override
 		{
 			double totEnergy = 0;
 
-			for (size_t t = receptiveFieldSize; t < numSamples; t++)
+			for (size_t t = 0; t < numSamples; t++)
 			{
 				totEnergy += (target[t] * target[t]);
 			}
@@ -112,14 +106,11 @@ namespace NeuralCpuTrain
 
 			for (size_t t = 0; t < numSamples; t++)
 			{
-				if (t >= receptiveFieldSize)
-				{
-					double diff = static_cast<double>(output[t]) - static_cast<double>(target[t]);
-					tot += (diff * diff);
-				}
+				double diff = static_cast<double>(output[t]) - static_cast<double>(target[t]);
+				tot += (diff * diff);
 			}
 
-			return (tot / totEnergy) * static_cast<double>(numSamples - receptiveFieldSize);
+			return (tot / totEnergy) * static_cast<double>(numSamples);
 		}
 	};
 
@@ -302,7 +293,7 @@ namespace NeuralCpuTrain
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
 					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
-					double err = lossFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
+					double err = lossFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples) / static_cast<double>(verifySamples);
 
 					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
@@ -323,7 +314,7 @@ namespace NeuralCpuTrain
 					
 					if (lossEvalFunction.GetName() != lossFunction.GetName())
 					{
-						err = lossEvalFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples, receptiveField) / static_cast<double>(verifySamples - receptiveField);
+						err = lossEvalFunction.GetTotSquared(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField) / static_cast<double>(verifySamples - receptiveField);
 						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.8f}", err);
 					}
 
@@ -502,7 +493,7 @@ namespace NeuralCpuTrain
 						outputGradient = bufferArena.template GetBuffer<1>(outputSize);
 					}
 
-					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, 0, lossScale);
+					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
 
 					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardSlice.GetDataConst(), batchTargetSlice.GetDataConst(), outputSize, 0) / (float)outputSize << std::endl;
 
@@ -624,7 +615,7 @@ namespace NeuralCpuTrain
 					outputGradient = bufferArena.template GetBuffer<1>(outputSize);
 				}
 
-				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 0, 1.0f);
+				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 1.0f);
 
 				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(outputSize), forwardOutput.Slice(numSamples));
 
