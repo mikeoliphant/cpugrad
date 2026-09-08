@@ -5,8 +5,6 @@
 #include <filesystem>
 #include <thread>
 
-#include "dr_wav.h"
-
 #include "WaveNetBackprop.h"
 #include "BatchBuffer.h"
 #include "ThreadAffinity.h"
@@ -44,7 +42,7 @@ namespace cpugrad
 
 				for (size_t t = 0; t < numSamples; t++)
 				{
-					outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
+					outGradient[t] = static_cast<T>(T(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 				}
 			}
 
@@ -65,7 +63,7 @@ namespace cpugrad
 	template <typename T>
 	class ESRLossT : public LossT<T>
 	{
-		static constexpr T epsilon = TCONST(1e-8);
+		static constexpr T epsilon = T(1e-8);
 
 	public:
 		ESRLossT()
@@ -88,7 +86,7 @@ namespace cpugrad
 
 			for (size_t t = 0; t < numSamples; t++)
 			{
-				outGradient[t] = static_cast<T>(TCONST(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
+				outGradient[t] = static_cast<T>(T(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 			}
 		}
 
@@ -354,29 +352,6 @@ namespace cpugrad
 				size_t verifySamples = (size_t)(numSamples * .1f);
 
 				TrainModel(dataPair.first.data(), dataPair.second.data(), numSamples - verifySamples, dataPair.first.data() + verifySamples, dataPair.second.data() + verifySamples, verifySamples);
-			}
-
-			void TrainWav(const std::filesystem::path inWavePath, const std::filesystem::path targetWavePath)
-			{
-				unsigned int channels;
-				unsigned int sampleRate;
-				drwav_uint64 numFrames;
-
-				float* inData = drwav_open_file_and_read_pcm_frames_f32(inWavePath.string().c_str(), &channels, &sampleRate, &numFrames, nullptr);
-				float* targetData = drwav_open_file_and_read_pcm_frames_f32(targetWavePath.string().c_str(), &channels, &sampleRate, &numFrames, nullptr);
-
-				size_t startOffset = 48000 * 13;
-
-				size_t verifyFrames = 48000 * 9;
-
-				size_t frameDelay = 0;
-
-				//startOffset = 0;
-				//verifyFrames = (size_t)(numFrames * 0.1f);
-
-				size_t verifyOffset = (size_t)numFrames - verifyFrames;
-
-				TrainModel(inData + startOffset - frameDelay, targetData + startOffset, (size_t)numFrames - verifyFrames - startOffset - frameDelay, inData + verifyOffset - frameDelay, targetData + verifyOffset, verifyFrames - frameDelay);
 			}
 
 		private:

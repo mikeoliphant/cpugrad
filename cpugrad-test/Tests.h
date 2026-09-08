@@ -2,6 +2,7 @@
 
 #include "WaveNetBackprop.h"
 
+using namespace NeuralAudio;
 using namespace cpugrad;
 
 template <typename T, int InOutChannels, int Channels, int KernelSize, int Dilation, int HeadKernelSize>

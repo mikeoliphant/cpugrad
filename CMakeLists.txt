@@ -14,8 +14,7 @@ set(SOURCES
 	Dataset.h
 	Optimizer.h
 	BatchBuffer.h
-	ThreadAffinity.h
-	Tests.h)
+	ThreadAffinity.h)
 
 add_library(cpugrad ${SOURCES})
 target_include_directories(cpugrad PUBLIC deps/NeuralAudio/NeuralAudio)
@@ -23,3 +22,4 @@ target_link_libraries(cpugrad PUBLIC NeuralAudio)
 
 source_group(cpugrad ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})
 
+add_subdirectory(cpugrad-test cpugrad-test)
