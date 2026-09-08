@@ -365,7 +365,7 @@ namespace NeuralCpuTrain
 				float* inData = drwav_open_file_and_read_pcm_frames_f32(inWavePath.string().c_str(), &channels, &sampleRate, &numFrames, nullptr);
 				float* targetData = drwav_open_file_and_read_pcm_frames_f32(targetWavePath.string().c_str(), &channels, &sampleRate, &numFrames, nullptr);
 
-				size_t startOffset = 48000 * 1;
+				size_t startOffset = 48000 * 13;
 
 				size_t verifyFrames = 48000 * 9;
 

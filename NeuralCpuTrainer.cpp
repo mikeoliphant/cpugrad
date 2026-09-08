@@ -126,7 +126,7 @@ int main()
 
 	//modelTrainer->TrainIdentity(sinData);
 
-	modelTrainer->TrainWav(R"(C:\Share\Recordings\NAM\v1_1_1.wav)", R"(C:\Share\Recordings\NAM\BossSD1.wav)");
+	modelTrainer->TrainWav(R"(C:\Share\Recordings\NAM\NAMv3Input.wav)", R"(C:\Share\Recordings\NAM\BossSD1Capture.wav)");
 
 	//ChainBackpropModelT<float, 1, 1> chainBackProp;
 
