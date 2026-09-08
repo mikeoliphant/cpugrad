@@ -128,8 +128,9 @@ class OptimizerT
 		{
 		}
 
-		virtual void ApplyGradients()
+		virtual void ApplyGradients(float externalScaleFactor)
 		{
+			(void)externalScaleFactor;
 		}
 
 		size_t GetTotWeights()
@@ -203,7 +204,7 @@ class AdamOptimizerT : public OptimizerT<T>
 			}
 		}
 
-		void ApplyGradients() override
+		void ApplyGradients(float scaleFactor) override
 		{
 			double totalSumSq = 0;
 
@@ -214,11 +215,11 @@ class AdamOptimizerT : public OptimizerT<T>
 
 			float gradNorm = std::sqrt(static_cast<float>(totalSumSq));
 
-			float scaleFactor = 1.0f;
+			float scaledMaxNorm = maxNorm / scaleFactor;
 
-			if (gradNorm > maxNorm && gradNorm > 0.0f)
+			if ((gradNorm > scaledMaxNorm) && (gradNorm > 0.0f))
 			{
-				scaleFactor = maxNorm / gradNorm;
+				scaleFactor = scaledMaxNorm / gradNorm;
 			}
 
 			for (AdamWeightGradientT<T>& grad : weightGrads)

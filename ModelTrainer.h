@@ -285,7 +285,7 @@ namespace NeuralCpuTrain
 							modelTrainerWorkers[w]->AddDWeightsTo(mainWorker->GetOptimizer());
 						}
 
-						mainWorker->GetOptimizer().ApplyGradients();
+						mainWorker->GetOptimizer().ApplyGradients(1.0f);
 						mainWorker->GetOptimizer().ResetGradients();
 					}
 
