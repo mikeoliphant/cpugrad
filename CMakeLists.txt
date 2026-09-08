@@ -38,6 +38,7 @@ set(SOURCES
 	Dataset.h
 	Optimizer.h
 	BatchBuffer.h
+	ThreadAffinity.h
 	NAM.h
 	Tests.h)
 

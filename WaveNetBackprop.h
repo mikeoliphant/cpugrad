@@ -4,7 +4,61 @@
 #include <vector>
 #include <format>
 #include "ChannelBuffer.h"
+#include "MatMul.h"
 #include "Optimizer.h"
+
+#define MATMUL(output, input, mult, numSamples) \
+		if constexpr (MatMul<T, InChannels, OutChannels>::HasKernel()) \
+		{ \
+			const T* inputPtr = input.GetDataConst(); \
+			const T* multPtr = mult.GetDataConst(); \
+			\
+			T* outputPtr = output.GetData(); \
+			\
+			MatMul<T, InChannels, OutChannels>::MultiplyInitZero(inputPtr, outputPtr, multPtr, numSamples); \
+		} \
+		else \
+		{ \
+			auto outBlock = output.GetEigenMap(); \
+			\
+			outBlock.noalias() = mult.GetEigenMapConst() * input.GetEigenMapConst(); \
+		}
+
+#define MATMUL_BIAS(output, input, mult, bias, numSamples) \
+		if constexpr (MatMul<T, InChannels, OutChannels>::HasKernel()) \
+		{ \
+			const T* inputPtr = input.GetDataConst(); \
+			const T* multPtr = mult.GetDataConst(); \
+			const T* biasPtr = bias.data(); \
+			\
+			T* outputPtr = output.GetData(); \
+			\
+			MatMul<T, InChannels, OutChannels>::MultiplyInitColwise(inputPtr, outputPtr, multPtr, biasPtr, numSamples); \
+		} \
+		else \
+		{ \
+			auto outBlock = output.GetEigenMap(); \
+			\
+			outBlock.noalias() = (mult.GetEigenMapConst() * input.GetEigenMapConst()).colwise() + bias; \
+		}
+
+#define MATMUL_ACC(output, input, mult, numSamples) \
+		if constexpr (MatMul<T, InChannels, OutChannels>::HasKernel()) \
+		{ \
+			const T* inputPtr = input.GetDataConst(); \
+			const T* multPtr = mult.GetDataConst(); \
+			\
+			T* outputPtr = output.GetData(); \
+			\
+			MatMul<T, InChannels, OutChannels>::MultiplyAccumlulate(inputPtr, outputPtr, multPtr, numSamples); \
+		} \
+		else \
+		{ \
+			auto outBlock = output.GetEigenMap(); \
+			\
+			outBlock.noalias() += mult.GetEigenMapConst() * input.GetEigenMapConst(); \
+		}
+
 
 using namespace NeuralAudio;
 
@@ -198,11 +252,15 @@ namespace NeuralCpuTrain
 
 				if constexpr (DoBias)
 				{
-					output.GetEigenMap().noalias() = (weights.GetEigenMapConst() * input.GetEigenMapConst()).colwise() + bias;
+					MATMUL_BIAS(output, input, weights, bias, input.GetNumCols())
+
+					//output.GetEigenMap().noalias() = (weights.GetEigenMapConst() * input.GetEigenMapConst()).colwise() + bias;
 				}
 				else
 				{
-					output.GetEigenMap().noalias() = weights.GetEigenMapConst() * input.GetEigenMapConst();
+					MATMUL(output, input, weights, input.GetNumCols())
+
+					//output.GetEigenMap().noalias() = weights.GetEigenMapConst() * input.GetEigenMapConst();
 				}
 			}
 
@@ -296,15 +354,12 @@ namespace NeuralCpuTrain
 				{
 					const int inputOffset = Dilation * (int)k;
 
-					const auto inBlock = input.Slice(inputOffset, numSamplesOut);
-					auto outBlock = output.GetEigenMap();
-
-					outBlock.noalias() += weights[k].GetEigenMapConst() * inBlock.GetEigenMapConst();
+					MATMUL_ACC(output, input.Slice(inputOffset, numSamplesOut), this->weights[k], numSamplesOut)
 				}
 
 				if constexpr (DoBias)
 					output.GetEigenMap().colwise() += bias;
-			}	
+			}
 
 			void Backward(const ChannelRowSpan<T, InChannels>& input, const ChannelRowSpan<T, OutChannels>& dOutput, const ChannelRowSpan<T, InChannels>& dInput) override
 			{
@@ -409,7 +464,7 @@ namespace NeuralCpuTrain
 				auto outputMap = output.GetEigenMap();
 				auto inputMap = input.GetEigenMapConst();
 
-				outputMap = (inputMap.array() < TCONST(0.0)).select(inputMap.array() * TCONST(0.01), inputMap.array());
+				outputMap = (inputMap.array() < T(0.0)).select(inputMap.array() * T(0.01), inputMap.array());
 			}
 
 			void Backward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, Channels>& dOutput, const ChannelRowSpan<T, Channels>& dInput) override
@@ -421,7 +476,7 @@ namespace NeuralCpuTrain
 				auto dOutputMap = dOutput.GetEigenMapConst();
 				auto dInputMap = dInput.GetEigenMap();
 
-				dInputMap = (inputMap.array() < TCONST(0.0)).select(dOutputMap.array() * TCONST(0.01), dOutputMap.array());
+				dInputMap = (inputMap.array() < T(0.0)).select(dOutputMap.array() * T(0.01), dOutputMap.array());
 			}
 	};
 
