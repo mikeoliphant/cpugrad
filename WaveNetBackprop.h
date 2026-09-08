@@ -62,7 +62,7 @@
 
 using namespace NeuralAudio;
 
-namespace NeuralCpuTrain
+namespace cpugrad
 {
 	template <typename T>
 	class BackpropModelBaseT
@@ -480,4 +480,4 @@ namespace NeuralCpuTrain
 			}
 	};
 
-} // namespace NeuralCpuTrain
+} // namespace cpugrad

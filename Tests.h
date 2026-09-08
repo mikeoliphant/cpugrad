@@ -2,7 +2,7 @@
 
 #include "WaveNetBackprop.h"
 
-using namespace NeuralCpuTrain;
+using namespace cpugrad;
 
 template <typename T, int InOutChannels, int Channels, int KernelSize, int Dilation, int HeadKernelSize>
 class ConvTestT : public BackpropModelT<T, InOutChannels, InOutChannels>

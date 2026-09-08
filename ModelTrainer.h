@@ -12,7 +12,7 @@
 #include "ThreadAffinity.h"
 #include "Optimizer.h"
 
-namespace NeuralCpuTrain
+namespace cpugrad
 {
 	using Clock = std::chrono::steady_clock;
 
