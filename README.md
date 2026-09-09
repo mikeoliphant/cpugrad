@@ -14,4 +14,4 @@ Features so far:
 - "Adam" optimizer
 - Arena-based memory buffer allocation
 
-It is currently very much a "semi"-autograd. Backward passes must be hand-written. This may change in the future.
+It is currently very much a not-so-autograd. Backward passes must be hand-written. This may change in the future.
