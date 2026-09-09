@@ -84,6 +84,19 @@ namespace cpugrad
 			}
 		}
 
+		void GetWeights(std::vector<float>::iterator& outWeights) override
+		{
+			for (size_t i = 0; i < OutChannels; i++)
+				for (size_t j = 0; j < InChannels; j++)
+					*(outWeights++) = weights(i, j);
+
+			if constexpr (DoBias)
+			{
+				for (size_t i = 0; i < OutChannels; i++)
+					*(outWeights++) = bias(i);
+			}
+		}
+
 		void AddWeightGradients() override
 		{
 			trainingContext->AddWeightGradient(weights.GetData(), dWeights.GetData(), InChannels * OutChannels);

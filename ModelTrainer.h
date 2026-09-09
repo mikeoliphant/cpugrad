@@ -175,6 +175,8 @@ namespace cpugrad
 				mainWorker = modelTrainerWorkers[0].get();
 
 				this->modelBackprop = mainWorker->GetModel();
+
+				bestWeights.resize(modelBackprop->GetNumWeights());
 			}
 			
 			size_t GetReceptiveField()
@@ -182,14 +184,29 @@ namespace cpugrad
 				return modelBackprop->GetReceptiveField();
 			}
 
-			ModelType* GetModel()
+			ModelType& GetModel()
 			{
-				return modelBackprop;
+				return *modelBackprop;
 			}
 
 			void SetMaxEpochs(size_t maxEpochs)
 			{
 				this->maxEpochs = maxEpochs;
+			}
+
+			void SetEpochCallback(std::function<bool(size_t epoch, double loss)> callback)
+			{
+				this->epochCallback = std::move(callback);
+			}
+
+			std::vector<float>& GetBestWeights()
+			{
+				return bestWeights;
+			}
+
+			double GetBestLoss()
+			{
+				return minLoss;
 			}
 
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
@@ -221,6 +238,8 @@ namespace cpugrad
 				std::cout << "Training " << trainingData.Batches().size() << " batches of size " << trainingSize << " (+" << receptiveField << ") using " << modelTrainerWorkers.size() << " threads" << std::endl;
 
 				std::vector<T> verifyOutput(verifySamples);
+
+				minLoss = std::numeric_limits<double>::max();
 
 				for (int epoch = 0; epoch < maxEpochs; ++epoch)
 				{
@@ -326,7 +345,25 @@ namespace cpugrad
 						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.8f}", err);
 					}
 
+					if (err < minLoss)
+					{
+						// save weights
+						auto it = bestWeights.begin();
+
+						modelBackprop->GetWeights(it);
+
+						std::cout << " *";
+
+						minLoss = err;
+					}
+
 					std::cout << std::endl;
+
+					if (epochCallback)
+					{
+						if (!epochCallback(epoch, err))
+							break;
+					}
 
 					learningRate *= learningRateDecay;
 				}
@@ -366,6 +403,9 @@ namespace cpugrad
 			LossType lossFunction;
 			LossEvalType lossEvalFunction;
 			size_t maxEpochs = 1000;
+			std::vector<float> bestWeights;
+			double minLoss;
+			std::function<bool(size_t epoch, double loss)> epochCallback;
 	};
 
 	template <typename T, typename ModelType, typename LossType>

@@ -143,6 +143,11 @@ namespace cpugrad
 				(void)inWeights;
 			}
 
+			virtual void GetWeights(std::vector<float>::iterator& outWeights)
+			{
+				(void)outWeights;
+			}
+
 			virtual void AddWeightGradients()
 			{
 			}

@@ -104,6 +104,20 @@ namespace cpugrad
 			}
 		}
 
+		void GetWeights(std::vector<float>::iterator& outWeights) override
+		{
+			for (size_t i = 0; i < OutChannels; i++)
+				for (size_t j = 0; j < InChannels; j++)
+					for (size_t k = 0; k < KernelSize; k++)
+						*(outWeights++) = weights[k](i, j);
+
+			if constexpr (DoBias)
+			{
+				for (size_t i = 0; i < OutChannels; i++)
+					*(outWeights++) = bias(i);
+			}
+		}
+
 		void AddWeightGradients() override
 		{
 			for (int k = 0; k < KernelSize; k++)
