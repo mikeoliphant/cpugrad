@@ -6,6 +6,7 @@ It is currently very much a work in progress. Currently it is mostly targeting t
 
 Features so far:
 
+- Self-contained with minimal dependencies
 - Dense layers
 - Causal 1D convolution layers
 - Threaded mini-batching
