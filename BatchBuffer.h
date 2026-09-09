@@ -9,9 +9,9 @@ using namespace NeuralAudio;
 
 namespace cpugrad
 {
-constexpr size_t SIMD_ALIGN = 32;
+    constexpr size_t SIMD_ALIGN = 32;
 
-template <typename T>
+    template <typename T>
     class BatchBufferArenaT
     {
 	    public:

@@ -10,7 +10,9 @@ add_subdirectory(deps/NeuralAudio NeuralAudio)
 
 set(SOURCES
 	ModelTrainer.h
-	WaveNetBackprop.h
+	BackpropModel.h
+	Dense.h
+	Conv1D.h
 	Dataset.h
 	Optimizer.h
 	BatchBuffer.h

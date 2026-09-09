@@ -1,6 +1,7 @@
 #pragma once
 
-#include "WaveNetBackprop.h"
+#include "Dense.h"
+#include "Conv1D.h"
 
 using namespace NeuralAudio;
 using namespace cpugrad;

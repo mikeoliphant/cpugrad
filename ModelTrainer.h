@@ -5,7 +5,6 @@
 #include <filesystem>
 #include <thread>
 
-#include "WaveNetBackprop.h"
 #include "BatchBuffer.h"
 #include "ThreadAffinity.h"
 #include "Optimizer.h"
@@ -159,15 +158,16 @@ namespace cpugrad
 	class ModelTrainerT
 	{
 		public:
-			ModelTrainerT() :
+			ModelTrainerT(size_t numThreads = 0) :
 				lossFunction(),
 				lossEvalFunction()
 			{
-				auto numCores = ThreadAffinityManager::GetPhysicalCoreCount();
+				if (numThreads == 0)
+				{
+					numThreads = (size_t)ThreadAffinityManager::GetPhysicalCoreCount();
+				}
 
-				std::cout << numCores << " physical cores detected" << std::endl;
-
-				for (int w = 0; w < numCores; w++)
+				for (size_t w = 0; w < numThreads; w++)
 				{
 					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>((uint32_t)w));
 				}
@@ -185,6 +185,11 @@ namespace cpugrad
 			ModelType* GetModel()
 			{
 				return modelBackprop;
+			}
+
+			void SetMaxEpochs(size_t maxEpochs)
+			{
+				this->maxEpochs = maxEpochs;
 			}
 
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
@@ -213,11 +218,11 @@ namespace cpugrad
 				size_t totBatches = trainingData.Batches().size();
 				size_t numMiniBatches = (size_t)std::ceil((float)totBatches / (float)miniBatchSize);
 
-				std::cout << "Training " << trainingData.Batches().size() << " batches of size " << trainingSize << " (+" << receptiveField << ")" << std::endl;
+				std::cout << "Training " << trainingData.Batches().size() << " batches of size " << trainingSize << " (+" << receptiveField << ") using " << modelTrainerWorkers.size() << " threads" << std::endl;
 
 				std::vector<T> verifyOutput(verifySamples);
 
-				for (int epoch = 0; epoch < 20000; ++epoch)
+				for (int epoch = 0; epoch < maxEpochs; ++epoch)
 				{
 					auto epochStart = Clock::now();
 					auto trainDuration = Clock::duration::zero();
@@ -313,7 +318,7 @@ namespace cpugrad
 						std::cout << "Thread - Forward: " << threadForwardTime << " Back: " << threadBackTime << " Other: " << (threadTotalTime - threadForwardTime - threadBackTime) << std::endl;
 					}
 
-					std::cout << "Epoch: " << epoch << " " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction.GetName() << ": " << std::format("{:.8f}", err);
+					std::cout << "Epoch " << std::format("{:3d}", (epoch + 1)) << ": " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction.GetName() << ": " << std::format("{:.8f}", err);
 					
 					if (lossEvalFunction.GetName() != lossFunction.GetName())
 					{
@@ -360,6 +365,7 @@ namespace cpugrad
 			ModelType* modelBackprop;
 			LossType lossFunction;
 			LossEvalType lossEvalFunction;
+			size_t maxEpochs = 1000;
 	};
 
 	template <typename T, typename ModelType, typename LossType>

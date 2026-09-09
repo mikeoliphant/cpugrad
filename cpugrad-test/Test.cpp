@@ -7,7 +7,8 @@
 #include <fstream>
 #include <xmmintrin.h>
 
-#include "WaveNetBackprop.h"
+#include "Dense.h"
+#include "Conv1D.h"
 #include "ModelTrainer.h"
 #include "Dataset.h"
 #include "Tests.h"
