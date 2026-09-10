@@ -219,7 +219,7 @@ namespace cpugrad
 				mainWorker->TestBackprop(weightIndex, input, target, numSamples);
 			}
 
-			void TrainModel(const T* input, T* target, const size_t trainingSamples, const T* verifyInput, const T* verifyTarget, const size_t verifySamples)
+			void TrainModel(const T* input, T* target, const size_t trainingSamples, const T* verifyInput, T* verifyTarget, const size_t verifySamples)
 			{
 				float learningRate = 0.004f;
 				float learningRateDecay = 0.993f;
@@ -320,7 +320,7 @@ namespace cpugrad
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
 					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
-					double err = lossFunction.GetTotSquared(verifyOutput.data(), verifyTarget, verifySamples) / static_cast<double>(verifySamples);
+					double err = lossFunction.GetTotSquared(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField) / static_cast<double>(verifySamples - receptiveField);
 
 					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
@@ -367,18 +367,6 @@ namespace cpugrad
 
 					learningRate *= learningRateDecay;
 				}
-			}
-
-			void ApplyHPF(T* data, size_t numSamples)
-			{
-				constexpr T coefficient = T(0.95);
-
-				for (size_t n = numSamples - 1; n > 0; --n)
-				{
-					data[n] = data[n] - (coefficient * data[n - 1]);
-				}
-
-				data[0] = data[0] * (1.0f - coefficient);
 			}
 
 			void TrainIdentity(std::vector<float>& data)
@@ -476,6 +464,18 @@ namespace cpugrad
 				forward += forwardDuration;
 				back += backDuration;
 			}
+	
+			void ApplyHPF(T* data, size_t numSamples)
+			{
+				constexpr T coefficient = T(0.85);
+
+				for (size_t n = numSamples - 1; n > 0; --n)
+				{
+					data[n] = data[n] - (coefficient * data[n - 1]);
+				}
+
+				data[0] = data[0] * (1.0f - coefficient);
+			}
 
 			void TrainBatches(const T* input, const T* target, double lossScale)
 			{
@@ -522,9 +522,12 @@ namespace cpugrad
 						outputGradient = bufferArena.template GetBuffer<1>(outputSize);
 					}
 
+					ApplyHPF(batchTargetPtr, outputSize);
+					ApplyHPF(forwardOutput.GetData(), outputSize);
+
 					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
 
-					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardSlice.GetDataConst(), batchTargetSlice.GetDataConst(), outputSize, 0) / (float)outputSize << std::endl;
+					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
 
 					// Really shouldn't need this
 					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
