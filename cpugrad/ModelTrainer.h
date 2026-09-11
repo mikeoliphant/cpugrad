@@ -243,7 +243,7 @@ namespace cpugrad
 
 				minLoss = std::numeric_limits<double>::max();
 
-				for (int epoch = 0; epoch < maxEpochs; ++epoch)
+				for (size_t epoch = 0; epoch < maxEpochs; epoch++)
 				{
 					auto epochStart = Clock::now();
 					auto trainDuration = Clock::duration::zero();
