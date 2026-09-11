@@ -16,7 +16,7 @@ set(SOURCES
 	cpugrad/Dataset.h
 	cpugrad/Optimizer.h
 	cpugrad/BatchBuffer.h
-	cpugrad/ThreadAffinity.h)
+	cpugrad/Platform.h)
 
 add_library(cpugrad ${SOURCES})
 target_include_directories(cpugrad PUBLIC deps/NeuralAudio/NeuralAudio)

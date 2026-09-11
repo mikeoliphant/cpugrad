@@ -6,7 +6,7 @@
 #include <thread>
 
 #include "BatchBuffer.h"
-#include "ThreadAffinity.h"
+#include "Platform.h"
 #include "Optimizer.h"
 
 namespace cpugrad
@@ -162,6 +162,8 @@ namespace cpugrad
 				lossFunction(),
 				lossEvalFunction()
 			{
+				DenormalManager::DisableDenormals();
+
 				if (numThreads == 0)
 				{
 					numThreads = (size_t)ThreadAffinityManager::GetPhysicalCoreCount();
