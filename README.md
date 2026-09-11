@@ -1,6 +1,6 @@
 # cpugrad
 
-cpugrad is a c++ machine learning library focused on high performance on CPUs.
+cpugrad is a c++ machine learning library focused on high performance training on CPUs.
 
 It is currently very much a work in progress. Currently it is mostly targeting time series data (ie: audio samples).
 
