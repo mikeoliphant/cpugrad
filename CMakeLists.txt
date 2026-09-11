@@ -9,14 +9,14 @@ set(BUILD_NAMCORE OFF CACHE BOOL "")
 add_subdirectory(deps/NeuralAudio NeuralAudio)
 
 set(SOURCES
-	ModelTrainer.h
-	BackpropModel.h
-	Dense.h
-	Conv1D.h
-	Dataset.h
-	Optimizer.h
-	BatchBuffer.h
-	ThreadAffinity.h)
+	cpugrad/ModelTrainer.h
+	cpugrad/BackpropModel.h
+	cpugrad/Dense.h
+	cpugrad/Conv1D.h
+	cpugrad/Dataset.h
+	cpugrad/Optimizer.h
+	cpugrad/BatchBuffer.h
+	cpugrad/ThreadAffinity.h)
 
 add_library(cpugrad ${SOURCES})
 target_include_directories(cpugrad PUBLIC deps/NeuralAudio/NeuralAudio)
