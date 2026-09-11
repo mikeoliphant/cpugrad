@@ -15,3 +15,5 @@ Features so far:
 - Arena-based memory buffer allocation
 
 It is currently very much a not-so-autograd. Backward passes must be hand-written. This may change in the future.
+
+The goal is for this library to be general purpose. At this early stage, though, there are likely many things that are hard-coded to fit my specific needs when they should be configurable.
