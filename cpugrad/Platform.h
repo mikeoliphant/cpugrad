@@ -4,8 +4,10 @@
 #include <thread>
 #include <vector>
 #include <cstdint>
-#include <immintrin.h>
 #include <fenv.h>
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+#include <immintrin.h>
+#endif
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
