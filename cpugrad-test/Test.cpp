@@ -5,7 +5,6 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
-#include <xmmintrin.h>
 
 #include "Dense.h"
 #include "Conv1D.h"
@@ -17,9 +16,6 @@ using namespace cpugrad;
 
 int main()
 {
-	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
-
 	DataGen dataGen(123);
 
 	size_t numSamples = 48000 * 180;
