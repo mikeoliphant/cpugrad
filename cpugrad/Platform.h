@@ -67,42 +67,94 @@ class ThreadAffinityManager
 public:
     ThreadAffinityManager() = delete;
 
-    static uint32_t GetPhysicalCoreCount() noexcept {
+    static uint32_t GetPhysicalCoreCount() noexcept
+    {
 #if defined(_WIN32)
         DWORD length = 0;
-        if (!GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length) &&
-            GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-
+        if (!GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length) && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
+        {
             std::vector<uint8_t> buffer(length);
+
             auto* engines = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
 
-            if (GetLogicalProcessorInformationEx(RelationProcessorCore, engines, &length)) {
+            if (GetLogicalProcessorInformationEx(RelationProcessorCore, engines, &length))
+            {
                 uint32_t physicalCores = 0;
                 DWORD offset = 0;
-                while (offset < length) {
+                while (offset < length)
+                {
                     auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
-                    if (current->Relationship == RelationProcessorCore) {
-                        ++physicalCores;
+
+                    if (current->Relationship == RelationProcessorCore)
+                    {
+                        physicalCores++;
                     }
+
                     offset += current->Size;
                 }
+
                 return physicalCores > 0 ? physicalCores : std::thread::hardware_concurrency();
             }
         }
 #elif defined(__linux__)
         long cores = sysconf(_SC_NPROCESSORS_ONLN);
-        if (cores > 0) {
+
+        if (cores > 0)
+        {
             return static_cast<uint32_t>(cores);
         }
 #elif defined(__APPLE__)
         int count = 0;
         size_t size = sizeof(count);
-        if (sysctlbyname("hw.physicalcpu", &count, &size, nullptr, 0) == 0) {
+
+        if (sysctlbyname("hw.perflevel0.physicalcpu", &count, &size, nullptr, 0) == 0)
+        {
+            return static_cast<uint32_t>(count);
+        }
+
+        if (sysctlbyname("hw.physicalcpu", &count, &size, nullptr, 0) == 0)
+        {
             return static_cast<uint32_t>(count);
         }
 #endif
         uint32_t logicalCores = std::thread::hardware_concurrency();
+
         return logicalCores > 0 ? logicalCores : 1;
+    }
+
+    static void SetHighPerformancePriority()
+    {
+#if defined(_WIN32)
+        HANDLE threadHandle = GetCurrentThread();
+        if (!SetThreadPriority(threadHandle, THREAD_PRIORITY_HIGHEST)) {
+            std::cerr << "Failed to set Windows thread priority. Error: " << GetLastError() << std::endl;
+        }
+
+#elif defined(__APPLE__)
+        int qosResult = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+
+        if (qosResult != 0) {
+            std::cerr << "Failed to set macOS QoS class. Error code: " << qosResult << std::endl;
+        }
+
+#elif defined(__linux__)
+        pthread_t nativeThread = pthread_self();
+
+        struct sched_param schedParam;
+        schedParam.sched_priority = sched_get_priority_max(SCHED_FIFO);
+
+        int schedResult = pthread_setschedparam(nativeThread, SCHED_FIFO, &schedParam);
+
+        if (schedResult != 0)
+        {
+            std::cerr << "Failed to set Linux real-time priority. Error code: " << schedResult << std::endl;
+
+#include <sys/resource.h>
+            if (setpriority(PRIO_PROCESS, 0, -20) != 0) {
+                std::cerr << "Linux fallback to nice value failed as well." << std::endl;
+            }
+        }
+#endif
     }
 
     static bool PinCurrentThread(uint32_t coreIndex) noexcept {
