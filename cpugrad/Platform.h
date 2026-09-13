@@ -23,8 +23,7 @@
 #elif defined(__APPLE__)
 #include <sys/sysctl.h>
 #include <pthread.h>
-#define QOS_CLASS_USER_INTERACTIVE 0x21
-extern "C" int pthread_set_qos_class_self_np(int qosClass, int relativePriority); 
+#include <pthread/qos.h>
 #endif
 
 /**
@@ -130,13 +129,13 @@ public:
     {
 #if defined(_WIN32)
         HANDLE threadHandle = GetCurrentThread();
-        if (!SetThreadPriority(threadHandle, THREAD_PRIORITY_HIGHEST)) {
+        if (!SetThreadPriority(threadHandle, THREAD_PRIORITY_HIGHEST))
+        {
             std::cerr << "Failed to set Windows thread priority. Error: " << GetLastError() << std::endl;
         }
 
 #elif defined(__APPLE__)
         int qosResult = pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
-
         if (qosResult != 0) {
             std::cerr << "Failed to set macOS QoS class. Error code: " << qosResult << std::endl;
         }
@@ -161,7 +160,8 @@ public:
 #endif
     }
 
-    static bool PinCurrentThread(uint32_t coreIndex) noexcept {
+    static bool PinCurrentThread(uint32_t coreIndex) noexcept
+    {
 #if defined(_WIN32)
         HANDLE thread = GetCurrentThread();
         DWORD_PTR mask = static_cast<DWORD_PTR>(1) << coreIndex;
