@@ -5,6 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 project(cpugrad VERSION 0.0.1)
 
 set(BUILD_NAMCORE OFF CACHE BOOL "") 
+set(BUILD_RTNEURAL OFF CACHE BOOL "") 
 
 add_subdirectory(deps/NeuralAudio NeuralAudio)
 
