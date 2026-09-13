@@ -19,8 +19,12 @@
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
+#include <sys/resource.h>
 #elif defined(__APPLE__)
 #include <sys/sysctl.h>
+#include <pthread.h>
+#define QOS_CLASS_USER_INTERACTIVE 0x21
+extern "C" int pthread_set_qos_class_self_np(int qosClass, int relativePriority); 
 #endif
 
 /**
