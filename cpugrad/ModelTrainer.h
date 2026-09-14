@@ -171,7 +171,7 @@ namespace cpugrad
 
 				for (size_t w = 0; w < numThreads; w++)
 				{
-					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>((uint32_t)w));
+					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>((uint32_t)w, trainingSize));
 				}
 				
 				mainWorker = modelTrainerWorkers[0].get();
@@ -228,7 +228,6 @@ namespace cpugrad
 
 				modelBackprop->RandomizeWeights();
 
-				size_t trainingSize = 8192;
 				size_t receptiveField = modelBackprop->GetReceptiveField();
 
 				TrainingData trainingData(trainingSamples, trainingSize, receptiveField);
@@ -387,6 +386,7 @@ namespace cpugrad
 			}
 
 		private:
+			size_t trainingSize = 8192;
 			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
 			TrainerWorkerT<T, ModelType>* mainWorker;
 			ModelType* modelBackprop;
@@ -402,12 +402,12 @@ namespace cpugrad
 	class TrainerWorkerT : public TrainingContextT<T>
 	{
 		public:
-			TrainerWorkerT(uint32_t coreID) :
+			TrainerWorkerT(uint32_t coreID, size_t trainingSize) :
 				coreID(coreID),
 				modelBackprop(std::make_unique<ModelType>()),
 				lossFunction(),
 				optimizer(),
-				bufferArena()
+				bufferArena(modelBackprop->GetMaxScratchBufferSize(trainingSize))
 			{
 				this->modelBackprop->SetTrainingContext(this);
 			}
@@ -540,8 +540,6 @@ namespace cpugrad
 					backDuration += (Clock::now() - backStart);
 
 					bufferArena.FreeScratchBuffer(layerOutputGradient);
-
-					bufferArena.ReleaseScratch();
 				}
 
 				totalDuration += (Clock::now() - totalStart);

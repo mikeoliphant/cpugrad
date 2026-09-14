@@ -91,6 +91,13 @@ namespace cpugrad
 				return 0;
 			}
 
+			virtual size_t GetMaxScratchBufferSize(size_t inputBufferSize)
+			{
+				(void)inputBufferSize;
+
+				return 0;
+			}
+
 			virtual size_t GetInChannels()
 			{
 				return 0;

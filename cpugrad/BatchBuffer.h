@@ -15,9 +15,11 @@ namespace cpugrad
     class BatchBufferArenaT
     {
 	    public:
-            explicit BatchBufferArenaT() :
+            explicit BatchBufferArenaT(size_t maxScratchSize) :
                 stepArena(),
-                scratchPool()
+                scratchPool(),
+                scratchIndex(0),
+                maxScratchSize(maxScratchSize)
             {
             }
 
@@ -32,7 +34,18 @@ namespace cpugrad
             template <int Channels>
             ChannelBufferDynamic<T, Channels> GetScratchBuffer(size_t numCols)
             {
-                ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(scratchPool.allocate(Channels * numCols * sizeof(T), SIMD_ALIGN)), numCols);
+                void* data = nullptr;
+
+                if (scratchIndex == (scratchPool.size()))
+                {
+                    scratchPool.push_back(stepArena.allocate(maxScratchSize * sizeof(T), SIMD_ALIGN));
+                }
+
+                data = scratchPool[scratchIndex];
+
+                scratchIndex++;
+
+                ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(data), numCols);
 
                 return buf;
             }
@@ -40,17 +53,13 @@ namespace cpugrad
             template <int Channels>
             void FreeScratchBuffer(ChannelBufferDynamic<T, Channels>& buf)
             {
-                scratchPool.deallocate(buf.GetData(), buf.GetSize() * sizeof(T), SIMD_ALIGN);
-            }
-
-            void ReleaseScratch()
-            {
-                scratchPool.release();
+                scratchIndex--;
             }
 
 	    private:
-            std::pmr::monotonic_buffer_resource stepArena; // data that persists (ie: forward pass intermediate outputs)
-            std::pmr::unsynchronized_pool_resource scratchPool; // temporary data (forward pass scratch buffers and backward gradient buffers)
-
+            std::pmr::monotonic_buffer_resource stepArena;
+            std::vector<void*> scratchPool;
+            size_t scratchIndex;
+            size_t maxScratchSize;
     };
 }
