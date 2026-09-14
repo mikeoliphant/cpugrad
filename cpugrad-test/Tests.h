@@ -36,7 +36,7 @@ public:
 
 		relu.Forward(convOut, reluOut);
 
-		headRechannel.Forward(reluOut, output);
+		oneByOne.Forward(reluOut, output);
 	}
 
 	void Backward(const ChannelRowSpan<T, InOutChannels>& input, const ChannelRowSpan<T, InOutChannels>& dOutput, const ChannelRowSpan<T, InOutChannels>& dInput) override
@@ -45,11 +45,11 @@ public:
 
 		size_t numSamples = dOutput.GetNumCols();
 
-		numSamples += headRechannel.GetReceptiveField();
+		numSamples += oneByOne.GetReceptiveField();
 		auto dOneByOneOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamples);
 
 		dOneByOneOut.SetZero();
-		headRechannel.Backward(reluOut, dOutput, dOneByOneOut);
+		oneByOne.Backward(reluOut, dOutput, dOneByOneOut);
 
 		auto dReluOut = trainingContext->GetBufferArena().template GetScratchBuffer<Channels>(numSamples);
 
@@ -74,12 +74,12 @@ public:
 
 	size_t GetReceptiveField() override
 	{
-		return conv.GetReceptiveField() + headRechannel.GetReceptiveField();
+		return conv.GetReceptiveField() + oneByOne.GetReceptiveField();
 	}
 
 	size_t GetNumWeights() override
 	{
-		return conv.GetNumWeights() + headRechannel.GetNumWeights() + rechannel.GetNumWeights();
+		return conv.GetNumWeights() + oneByOne.GetNumWeights() + rechannel.GetNumWeights();
 	}
 
 	void RandomizeWeights() override
@@ -88,14 +88,14 @@ public:
 
 		conv.RandomizeWeights();
 
-		headRechannel.RandomizeWeights();
+		oneByOne.RandomizeWeights();
 	}
 
 	void SetWeights(std::vector<float>::iterator& inWeights) override
 	{
 		rechannel.SetWeights(inWeights);
 		conv.SetWeights(inWeights);
-		headRechannel.SetWeights(inWeights);
+		oneByOne.SetWeights(inWeights);
 	}
 
 	void SetTrainingContext(TrainingContextT<T>* context) override
@@ -104,7 +104,7 @@ public:
 
 		rechannel.SetTrainingContext(context);
 		conv.SetTrainingContext(context);
-		headRechannel.SetTrainingContext(context);
+		oneByOne.SetTrainingContext(context);
 	}
 
 private:
@@ -114,7 +114,7 @@ private:
 	ChannelBufferDynamic<T, Channels> convOut;
 	LeakyReLUT<T, Channels> relu;
 	ChannelBufferDynamic<T, Channels> reluOut;
-	Conv1DBackpropT<T, Channels, InOutChannels, HeadKernelSize, true, 1> headRechannel;
+	Conv1DBackpropT<T, Channels, InOutChannels, HeadKernelSize, true, 1> oneByOne;
 };
 
 template <typename T, int InOutChannels, int KernelSize, int Dilation>

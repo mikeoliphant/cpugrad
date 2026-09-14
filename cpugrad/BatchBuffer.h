@@ -34,14 +34,17 @@ namespace cpugrad
             template <int Channels>
             ChannelBufferDynamic<T, Channels> GetScratchBuffer(size_t numCols)
             {
-                void* data = nullptr;
+                //ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(scratchPool.allocate(Channels * numCols * sizeof(T), SIMD_ALIGN)), numCols);
+                
+                if ((Channels * numCols) > maxScratchSize)
+                    throw std::runtime_error("Tried to allocate a buffer > maxScratchSize");
 
                 if (scratchIndex == (scratchPool.size()))
                 {
                     scratchPool.push_back(stepArena.allocate(maxScratchSize * sizeof(T), SIMD_ALIGN));
                 }
 
-                data = scratchPool[scratchIndex];
+                void* data = scratchPool[scratchIndex];
 
                 scratchIndex++;
 
@@ -53,11 +56,20 @@ namespace cpugrad
             template <int Channels>
             void FreeScratchBuffer(ChannelBufferDynamic<T, Channels>& buf)
             {
+                //scratchPool.deallocate(buf.GetData(), buf.GetSize() * sizeof(T), SIMD_ALIGN);
+                
+                if (scratchIndex == 0)
+                    throw std::runtime_error("Tried to free too many scratch buffers");
+
+                if (buf.GetDataConst() != scratchPool[scratchIndex - 1])
+                    throw std::runtime_error("Freed a scratch buffer that was not top of the stack");
+
                 scratchIndex--;
             }
 
 	    private:
             std::pmr::monotonic_buffer_resource stepArena;
+            //std::pmr::unsynchronized_pool_resource scratchPool;
             std::vector<void*> scratchPool;
             size_t scratchIndex;
             size_t maxScratchSize;
