@@ -482,7 +482,7 @@ namespace cpugrad
 			void TrainBatches(const T* input, const T* target, double lossScale)
 			{
 				//ThreadAffinityManager::PinCurrentThread(coreID * 2);
-				ThreadAffinityManager::SetHighPerformancePriority();
+				//ThreadAffinityManager::SetHighPerformancePriority();
 
 				auto totalStart = Clock::now();
 
