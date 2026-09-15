@@ -158,13 +158,7 @@ namespace cpugrad
 	class ModelTrainerT
 	{
 		public:
-			ModelTrainerT(size_t numThreads = 0)
-				: ModelTrainerT(numThreads, std::mt19937(std::random_device{}()))
-			{
-			}
-
-			ModelTrainerT(size_t numThreads, const std::mt19937& rand) :
-				rand(rand),
+			ModelTrainerT(size_t numThreads = 0) :
 				lossFunction(),
 				lossEvalFunction()
 			{
@@ -232,7 +226,7 @@ namespace cpugrad
 				float learningRate = 0.004f;
 				float learningRateDecay = 0.993f;
 
-				modelBackprop->RandomizeWeights(rand);
+				modelBackprop->RandomizeWeights();
 
 				size_t receptiveField = modelBackprop->GetReceptiveField();
 
@@ -393,7 +387,6 @@ namespace cpugrad
 
 		private:
 			size_t trainingSize = 8192;
-			std::mt19937 rand;
 			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
 			TrainerWorkerT<T, ModelType>* mainWorker;
 			ModelType* modelBackprop;

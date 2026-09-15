@@ -82,13 +82,13 @@ public:
 		return conv.GetNumWeights() + oneByOne.GetNumWeights() + rechannel.GetNumWeights();
 	}
 
-	void RandomizeWeights() override
+	void RandomizeWeights(std::mt19937& rand) override
 	{
-		rechannel.RandomizeWeights();
+		rechannel.RandomizeWeights(rand);
 
-		conv.RandomizeWeights();
+		conv.RandomizeWeights(rand);
 
-		oneByOne.RandomizeWeights();
+		oneByOne.RandomizeWeights(rand);
 	}
 
 	void SetWeights(std::vector<float>::iterator& inWeights) override

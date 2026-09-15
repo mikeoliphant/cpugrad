@@ -80,9 +80,9 @@ namespace cpugrad
 			return OutChannels * InChannels * KernelSize + (DoBias ? OutChannels : 0);
 		}
 
-		void RandomizeWeights() override
+		void RandomizeWeights(std::mt19937& rand) override
 		{
-			BackpropModelT<T, InChannels, OutChannels>::RandomizeWeights();
+			BackpropModelT<T, InChannels, OutChannels>::RandomizeWeights(rand);
 
 			//if constexpr (DoBias)
 			//{

@@ -13,8 +13,8 @@ namespace cpugrad
 			{
 			}
 
-			DataGen(unsigned int seed) :
-				randGen(seed),
+			DataGen(std::mt19937& rand) :
+				randGen(rand),
 				dis(-1.0f, 1.0f)
 			{
 			

@@ -16,7 +16,9 @@ using namespace cpugrad;
 
 int main()
 {
-	DataGen dataGen(123);
+	std::mt19937 rand(123);
+
+	DataGen dataGen(rand);
 
 	size_t numSamples = 48000 * 180;
 

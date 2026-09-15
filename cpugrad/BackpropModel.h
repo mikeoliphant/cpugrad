@@ -67,14 +67,6 @@ namespace cpugrad
 	template <typename T>
 	class BackpropModelBaseT
 	{
-		static std::mt19937& getRand() {
-			static std::mt19937 engine(123);
-			//static std::random_device rd;
-			//static std::mt19937 engine(rd());
-
-			return engine;
-		}
-
 		public:
 			BackpropModelBaseT() {}
 
@@ -118,12 +110,12 @@ namespace cpugrad
 				return 1;
 			}
 
-			virtual void RandomizeWeights()
+			virtual void RandomizeWeights(std::mt19937& rand)
 			{
-				RandomizeWeights(GetNumFeatures());
+				RandomizeWeights(rand, GetNumFeatures());
 			}
 
-			void RandomizeWeights(size_t numFeatures)
+			void RandomizeWeights(std::mt19937& rand, size_t numFeatures)
 			{
 				//double stddev = std::sqrt(2.0 / (double)numFeatures);
 				//std::normal_distribution<double> dist(0.0, stddev);
@@ -137,7 +129,7 @@ namespace cpugrad
 
 				for (size_t i = 0; i < numWeights; i++)
 				{
-					weights[i] = (float)dist(getRand());
+					weights[i] = (float)dist(rand);
 				}
 
 				auto it = weights.begin();
