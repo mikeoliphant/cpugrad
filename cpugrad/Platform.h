@@ -112,7 +112,7 @@ public:
 
         std::set<uint32_t> seenPhysicalCores;
 
-        for (long i = 0; i < total_logical; ++i)
+        for (long i = 0; i < totalLogical; ++i)
         {
             std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(i) + "/topology/core_id";
             std::ifstream file(path);
