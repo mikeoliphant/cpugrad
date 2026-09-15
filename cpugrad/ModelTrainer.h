@@ -405,6 +405,13 @@ namespace cpugrad
 
 					learningRate *= learningRateDecay;
 				}
+
+				for (auto& t : threads)
+				{
+					t.request_stop();
+				}
+
+				startTrainingBarrier.arrive_and_wait();
 			}
 
 			void TrainIdentity(std::vector<float>& data)
