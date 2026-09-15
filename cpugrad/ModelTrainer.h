@@ -172,14 +172,16 @@ namespace cpugrad
 			{
 				DenormalManager::DisableDenormals();
 
+				auto coreIds = ThreadAffinityManager::GetPhysicalCores();
+
 				if (numThreads == 0)
 				{
-					numThreads = (size_t)ThreadAffinityManager::GetPhysicalCoreCount();
+					numThreads = coreIds.size();
 				}
 
 				for (size_t w = 0; w < numThreads; w++)
 				{
-					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>((uint32_t)w, trainingSize));
+					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>(coreIds[w], trainingSize));
 				}
 				
 				mainWorker = modelTrainerWorkers[0].get();
@@ -517,7 +519,7 @@ namespace cpugrad
 
 			void TrainBatches(std::stop_token stop,	std::barrier<>& startBarrier, std::barrier<>& finishBarrier, const T* input, const T* target, double& lossScale)
 			{
-				//ThreadAffinityManager::PinCurrentThread(coreID * 2);
+				ThreadAffinityManager::PinCurrentThread(coreID);
 				//ThreadAffinityManager::SetHighPerformancePriority();
 
 				while (!stop.stop_requested())

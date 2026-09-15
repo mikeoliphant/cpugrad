@@ -70,8 +70,11 @@ class ThreadAffinityManager
 public:
     ThreadAffinityManager() = delete;
 
-    static uint32_t GetPhysicalCoreCount() noexcept
+    static std::vector<uint32_t> GetPhysicalCores() noexcept
     {
+        uint32_t numCores = 0;
+        std::vector<uint32_t> coreIDs;
+
 #if defined(_WIN32)
         DWORD length = 0;
         if (!GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &length) && GetLastError() == ERROR_INSUFFICIENT_BUFFER)
@@ -82,29 +85,53 @@ public:
 
             if (GetLogicalProcessorInformationEx(RelationProcessorCore, engines, &length))
             {
-                uint32_t physicalCores = 0;
                 DWORD offset = 0;
+
                 while (offset < length)
                 {
                     auto* current = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
 
                     if (current->Relationship == RelationProcessorCore)
                     {
-                        physicalCores++;
+                        // FIX: Added [0] to index into the GroupMask array
+                        ULONG_PTR mask = current->Processor.GroupMask[0].Mask;
+                        unsigned long firstLogicalId = 0;
+
+                        if (_BitScanForward(&firstLogicalId, mask))
+                        {
+                            coreIDs.push_back(firstLogicalId);
+                        }
                     }
 
                     offset += current->Size;
                 }
-
-                return physicalCores > 0 ? physicalCores : std::thread::hardware_concurrency();
             }
         }
 #elif defined(__linux__)
-        long cores = sysconf(_SC_NPROCESSORS_ONLN);
+        long totalLogical = sysconf(_SC_NPROCESSORS_CONF);
 
-        if (cores > 0)
+        std::set<uint32_t> seenPhysicalCores;
+
+        for (long i = 0; i < total_logical; ++i)
         {
-            return static_cast<uint32_t>(cores);
+            std::string path = "/sys/devices/system/cpu/cpu" + std::to_string(i) + "/topology/core_id";
+            std::ifstream file(path);
+            uint32_t coreID = 0;
+
+            if (file >> coreID)
+            {
+                // If this is the first time we encounter this physical core,
+                // capture this logical ID for pinning.
+                if (seenPhysicalCores.find(coreID) == seenPhysicalCores.end())
+                {
+                    seenPhysicalCores.insert(coreID);
+                    coreIDs.push_back(static_cast<uint32_t>(i));
+                }
+            }
+            else
+            {
+                coreIDs.push_back(static_cast<uint32_t>(i));
+            }
         }
 #elif defined(__APPLE__)
         int count = 0;
@@ -112,17 +139,29 @@ public:
 
         if (sysctlbyname("hw.perflevel0.physicalcpu", &count, &size, nullptr, 0) == 0)
         {
-            return static_cast<uint32_t>(count);
+            numCores = static_cast<uint32_t>(count);
         }
 
         if (sysctlbyname("hw.physicalcpu", &count, &size, nullptr, 0) == 0)
         {
-            return static_cast<uint32_t>(count);
+            numCores = static_cast<uint32_t>(count);
         }
 #endif
-        uint32_t logicalCores = std::thread::hardware_concurrency();
+        if (coreIDs.size() == 0)
+        {
+            if (numCores == 0)
+                numCores = std::thread::hardware_concurrency();
 
-        return logicalCores > 0 ? logicalCores : 1;
+            if (numCores == 0)
+                numCores = 1;
+
+            for (uint32_t c = 0; c < numCores; c++)
+            {
+                coreIDs.push_back(c);
+            }
+        }
+
+        return coreIDs;
     }
 
     static void SetHighPerformancePriority()
