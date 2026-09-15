@@ -4,6 +4,8 @@
 #include <chrono>
 #include <filesystem>
 #include <thread>
+#include <barrier>
+#include <atomic>
 
 #include "BatchBuffer.h"
 #include "Platform.h"
@@ -170,14 +172,16 @@ namespace cpugrad
 			{
 				DenormalManager::DisableDenormals();
 
+				auto coreIds = ThreadAffinityManager::GetPhysicalCores();
+
 				if (numThreads == 0)
 				{
-					numThreads = (size_t)ThreadAffinityManager::GetPhysicalCoreCount();
+					numThreads = coreIds.size();
 				}
 
 				for (size_t w = 0; w < numThreads; w++)
 				{
-					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>((uint32_t)w, trainingSize));
+					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>(coreIds[w], trainingSize));
 				}
 				
 				mainWorker = modelTrainerWorkers[0].get();
@@ -248,6 +252,32 @@ namespace cpugrad
 
 				minLoss = std::numeric_limits<double>::max();
 
+				double lossScale = 1.0f;
+
+				std::vector<std::jthread> threads;
+
+				const size_t numWorkers = modelTrainerWorkers.size();
+
+				std::barrier startTrainingBarrier(numWorkers + 1);
+				std::barrier finishTrainingBarrier(numWorkers + 1);
+
+				threads.reserve(numWorkers);
+
+				for (auto& worker : modelTrainerWorkers)
+				{
+					threads.emplace_back([&, wPtr = worker.get()](std::stop_token stop)
+					{
+						wPtr->TrainBatches(
+							stop,
+							startTrainingBarrier,
+							finishTrainingBarrier,
+							input,
+							target,
+							lossScale
+						);
+					});
+				}
+
 				for (size_t epoch = 0; epoch < maxEpochs; epoch++)
 				{
 					auto epochStart = Clock::now();
@@ -270,12 +300,10 @@ namespace cpugrad
 					}
 
 					for (size_t currentMiniBatchNum = 0; currentMiniBatchNum < numMiniBatches; currentMiniBatchNum++)
-					{
-						std::vector<std::jthread> threads;
-						
+					{						
 						size_t thisMiniBatchSize = std::min(miniBatchSize, (totBatches - currentBatchNum));
 
-						float lossScale = 1.0f / (float)thisMiniBatchSize;
+						lossScale = 1.0f / (float)thisMiniBatchSize;
 
 						for (auto& worker : modelTrainerWorkers)
 						{
@@ -294,18 +322,21 @@ namespace cpugrad
 
 						auto trainStart = Clock::now();
 
-						for (auto& worker : modelTrainerWorkers)
-						{
-							threads.emplace_back(
-								&TrainerWorkerT<T, ModelType>::TrainBatches,
-								worker.get(),
-								std::ref(input),
-								std::ref(target),
-								lossScale
-							);							
-						}
+						startTrainingBarrier.arrive_and_wait();
+						finishTrainingBarrier.arrive_and_wait();
 
-						threads.clear();
+						//for (auto& worker : modelTrainerWorkers)
+						//{
+						//	threads.emplace_back(
+						//		&TrainerWorkerT<T, ModelType>::TrainBatches,
+						//		worker.get(),
+						//		std::ref(input),
+						//		std::ref(target),
+						//		lossScale
+						//	);							
+						//}
+
+						//threads.clear();
 
 						trainDuration += (Clock::now() - trainStart);
 
@@ -486,70 +517,79 @@ namespace cpugrad
 				data[0] = data[0] * (1.0f - coefficient);
 			}
 
-			void TrainBatches(const T* input, const T* target, double lossScale)
+			void TrainBatches(std::stop_token stop,	std::barrier<>& startBarrier, std::barrier<>& finishBarrier, const T* input, const T* target, double& lossScale)
 			{
-				//ThreadAffinityManager::PinCurrentThread(coreID * 2);
+				ThreadAffinityManager::PinCurrentThread(coreID);
 				//ThreadAffinityManager::SetHighPerformancePriority();
 
-				auto totalStart = Clock::now();
-
-				for (auto& b : batches)
+				while (!stop.stop_requested())
 				{
-					size_t numSamples = b.Size;
+					startBarrier.arrive_and_wait();
 
-					size_t receptiveField = modelBackprop->GetReceptiveField();
-					size_t outputSize = numSamples - receptiveField;
+					if (stop.stop_requested()) break;
 
-					if (batchInput.GetNumCols() == 0)
+					auto totalStart = Clock::now();
+
+					for (auto& b : batches)
 					{
-						batchInput = bufferArena.template GetBuffer<1>(numSamples);
+						size_t numSamples = b.Size;
+
+						size_t receptiveField = modelBackprop->GetReceptiveField();
+						size_t outputSize = numSamples - receptiveField;
+
+						if (batchInput.GetNumCols() == 0)
+						{
+							batchInput = bufferArena.template GetBuffer<1>(numSamples);
+						}
+
+						float* batchInPtr = batchInput.GetData();
+						std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
+
+						if (batchTarget.GetNumCols() == 0)
+						{
+							batchTarget = bufferArena.template GetBuffer<1>(outputSize);
+						}
+
+						auto batchTargetPtr = batchTarget.GetData();
+						std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
+
+						if (forwardOutput.GetNumCols() == 0)
+						{
+							forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
+						}
+
+						forwardOutput.SetZero();
+
+						auto forwardStart = Clock::now();
+						modelBackprop->Forward(batchInput, forwardOutput);
+						forwardDuration += (Clock::now() - forwardStart);
+
+						if (outputGradient.GetNumCols() == 0)
+						{
+							outputGradient = bufferArena.template GetBuffer<1>(outputSize);
+						}
+
+						ApplyHPF(batchTargetPtr, outputSize);
+						ApplyHPF(forwardOutput.GetData(), outputSize);
+
+						lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
+
+						//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
+
+						// Really shouldn't need this
+						auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
+
+						auto backStart = Clock::now();
+						modelBackprop->Backward(batchInput, outputGradient, layerOutputGradient);
+						backDuration += (Clock::now() - backStart);
+
+						bufferArena.FreeScratchBuffer(layerOutputGradient);
 					}
 
-					float* batchInPtr = batchInput.GetData();
-					std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
+					totalDuration += (Clock::now() - totalStart);
 
-					if (batchTarget.GetNumCols() == 0)
-					{
-						batchTarget = bufferArena.template GetBuffer<1>(outputSize);
-					}
-
-					auto batchTargetPtr = batchTarget.GetData();
-					std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
-
-					if (forwardOutput.GetNumCols() == 0)
-					{
-						forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
-					}
-
-					forwardOutput.SetZero();
-
-					auto forwardStart = Clock::now();
-					modelBackprop->Forward(batchInput, forwardOutput);
-					forwardDuration += (Clock::now() - forwardStart);
-
-					if (outputGradient.GetNumCols() == 0)
-					{
-						outputGradient = bufferArena.template GetBuffer<1>(outputSize);
-					}
-
-					ApplyHPF(batchTargetPtr, outputSize);
-					ApplyHPF(forwardOutput.GetData(), outputSize);
-
-					lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
-
-					//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
-
-					// Really shouldn't need this
-					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
-
-					auto backStart = Clock::now();
-					modelBackprop->Backward(batchInput, outputGradient, layerOutputGradient);
-					backDuration += (Clock::now() - backStart);
-
-					bufferArena.FreeScratchBuffer(layerOutputGradient);
+					finishBarrier.arrive_and_wait();
 				}
-
-				totalDuration += (Clock::now() - totalStart);
 			}
 
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
