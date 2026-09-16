@@ -132,9 +132,9 @@ namespace cpugrad
 		}
 
 	private:
-		alignas(32) std::array<ChannelBuffer<T, OutChannels, InChannels>, KernelSize> weights;
+		alignas(CHANNEL_BUFFER_ALIGN) std::array<ChannelBuffer<T, OutChannels, InChannels>, KernelSize> weights;
 		Eigen::Vector<T, OutChannels> bias;
-		alignas(32) std::array<ChannelBuffer<T, OutChannels, InChannels>, KernelSize> dWeights;
+		alignas(CHANNEL_BUFFER_ALIGN) std::array<ChannelBuffer<T, OutChannels, InChannels>, KernelSize> dWeights;
 		Eigen::Vector<T, OutChannels> dBias;
 	};
 }

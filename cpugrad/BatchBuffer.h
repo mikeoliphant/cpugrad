@@ -9,8 +9,6 @@ using namespace NeuralAudio;
 
 namespace cpugrad
 {
-    constexpr size_t SIMD_ALIGN = 32;
-
     template <typename T>
     class BatchBufferArenaT
     {
@@ -26,7 +24,7 @@ namespace cpugrad
 		    template <int Channels>
             ChannelBufferDynamic<T, Channels> GetBuffer(size_t numCols)
 		    {
-                ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(stepArena.allocate(Channels * numCols * sizeof(T), SIMD_ALIGN)), numCols);
+                ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(stepArena.allocate(Channels * numCols * sizeof(T), CHANNEL_BUFFER_ALIGN)), numCols);
 
                 return buf;
 		    }
@@ -41,7 +39,7 @@ namespace cpugrad
 
                 if (scratchIndex == (scratchPool.size()))
                 {
-                    scratchPool.push_back(stepArena.allocate(maxScratchSize * sizeof(T), SIMD_ALIGN));
+                    scratchPool.push_back(stepArena.allocate(maxScratchSize * sizeof(T), CHANNEL_BUFFER_ALIGN));
                 }
 
                 void* data = scratchPool[scratchIndex];
@@ -56,7 +54,7 @@ namespace cpugrad
             template <int Channels>
             void FreeScratchBuffer(ChannelBufferDynamic<T, Channels>& buf)
             {
-                //scratchPool.deallocate(buf.GetData(), buf.GetSize() * sizeof(T), SIMD_ALIGN);
+                //scratchPool.deallocate(buf.GetData(), buf.GetSize() * sizeof(T), CHANNEL_BUFFER_ALIGN);
                 
                 if (scratchIndex == 0)
                     throw std::runtime_error("Tried to free too many scratch buffers");
