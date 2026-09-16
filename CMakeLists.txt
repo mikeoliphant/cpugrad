@@ -14,6 +14,7 @@ set(SOURCES
 	cpugrad/BackpropModel.h
 	cpugrad/Dense.h
 	cpugrad/Conv1D.h
+	cpugrad/Loss.h
 	cpugrad/Dataset.h
 	cpugrad/Optimizer.h
 	cpugrad/BatchBuffer.h
