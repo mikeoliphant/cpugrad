@@ -452,11 +452,6 @@ namespace cpugrad
 						float* batchInPtr = batchInput.GetData();
 						std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
 
-						bufferArena.template GetBuffer<1>(batchTarget, outputSize);
-
-						auto batchTargetPtr = batchTarget.GetData();
-						std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
-
 						bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
 
 						forwardOutput.SetZero();
@@ -465,8 +460,12 @@ namespace cpugrad
 						modelBackprop->Forward(batchInput, forwardOutput);
 						forwardDuration += (Clock::now() - forwardStart);
 
+						auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
 
-						bufferArena.template GetBuffer<1>(outputGradient, outputSize);
+						auto batchTarget = bufferArena.template GetScratchBuffer<1>(outputSize);
+
+						auto batchTargetPtr = batchTarget.GetData();
+						std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
 
 						ApplyHPF(batchTargetPtr, outputSize);
 						ApplyHPF(forwardOutput.GetData(), outputSize);
@@ -474,6 +473,8 @@ namespace cpugrad
 						lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
 
 						//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
+
+						bufferArena.FreeScratchBuffer(batchTarget);
 
 						// Really shouldn't need this
 						auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
@@ -483,6 +484,7 @@ namespace cpugrad
 						backDuration += (Clock::now() - backStart);
 
 						bufferArena.FreeScratchBuffer(layerOutputGradient);
+						bufferArena.FreeScratchBuffer(outputGradient);
 					}
 
 					totalDuration += (Clock::now() - totalStart);
@@ -499,7 +501,6 @@ namespace cpugrad
 				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
 
 				bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
-
 				bufferArena.template GetBuffer<1>(batchInput, batchSize);
 
 				while (currentOffset < totalSamples)
@@ -544,14 +545,10 @@ namespace cpugrad
 					batchInput = bufferArena.template GetBuffer<1>(numSamples);
 				}
 
-				if (batchTarget.GetNumCols() == 0)
-				{
-					batchTarget = bufferArena.template GetBuffer<1>(outputSize);
-				}
-
 				float* batchInPtr = batchInput.GetData();
 				std::copy(input, input + numSamples, batchInPtr);
 
+				auto batchTarget = bufferArena.template GetScratchBuffer<1>(outputSize);
 				auto batchTargetPtr = batchTarget.GetData();
 				std::copy(target, target + numSamples, batchTargetPtr);
 
@@ -583,14 +580,15 @@ namespace cpugrad
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput);
 
-				if (outputGradient.GetNumCols() == 0)
-				{
-					outputGradient = bufferArena.template GetBuffer<1>(outputSize);
-				}
+				auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
 
 				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 1.0f);
 
 				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(outputSize), forwardOutput.Slice(numSamples));
+
+				bufferArena.FreeScratchBuffer(outputGradient);
+
+				bufferArena.FreeScratchBuffer(batchTarget);
 
 				double numGrad = (upErr - downErr) / (2.0 * delta);
 
@@ -608,9 +606,7 @@ namespace cpugrad
 			AdamOptimizerT<T> optimizer;
 			BatchBufferArenaT<T> bufferArena;
 			ChannelBufferDynamic<float, 1> batchInput;
-			ChannelBufferDynamic<float, 1> batchTarget;
 			ChannelBufferDynamic<float, 1> forwardOutput;
-			ChannelBufferDynamic<float, 1> outputGradient;
 			Clock::duration forwardDuration = Clock::duration::zero();
 			Clock::duration backDuration = Clock::duration::zero();
 			Clock::duration totalDuration = Clock::duration::zero();
