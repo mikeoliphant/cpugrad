@@ -6,6 +6,7 @@
 #include <thread>
 #include <barrier>
 #include <atomic>
+#include <random>
 
 #include "BatchBuffer.h"
 #include "Platform.h"
@@ -260,7 +261,7 @@ namespace cpugrad
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
 					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
-					double err = lossFunction.GetTotSquared(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField) / static_cast<double>(verifySamples - receptiveField);
+					double err = lossFunction.GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 
 					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
@@ -281,7 +282,7 @@ namespace cpugrad
 					
 					if (lossEvalFunction.GetName() != lossFunction.GetName())
 					{
-						err = lossEvalFunction.GetTotSquared(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField) / static_cast<double>(verifySamples - receptiveField);
+						err = lossEvalFunction.GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.8f}", err);
 					}
 
@@ -581,7 +582,7 @@ namespace cpugrad
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput);
 
-				double upErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
+				double upErr = lossFunction.GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize);
 
 				*weightPtr = originalWeight - (T)delta;
 
@@ -589,7 +590,7 @@ namespace cpugrad
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(outputSize));
 
-				double downErr = lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize, 0) / static_cast<double>(outputSize);
+				double downErr = lossFunction.GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize);
 
 				*weightPtr = originalWeight;
 

@@ -7,7 +7,7 @@ public:
 	virtual ~LossT() = default;
 	virtual std::string& GetName() { return name; }
 	virtual void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) = 0;
-	virtual double GetTotSquared(const T* output, const T* target, size_t numSamples) = 0;
+	virtual double GetMeanLoss(const T* output, const T* target, size_t numSamples) = 0;
 
 protected:
 	std::string name;
@@ -32,7 +32,7 @@ public:
 		}
 	}
 
-	double GetTotSquared(const T* output, const T* target, size_t numSamples) override
+	double GetMeanLoss(const T* output, const T* target, size_t numSamples) override
 	{
 		double tot = 0;
 
@@ -42,7 +42,7 @@ public:
 			tot += (diff * diff);
 		}
 
-		return tot;
+		return tot / static_cast<double>(numSamples);
 	}
 };
 
@@ -76,7 +76,7 @@ public:
 		}
 	}
 
-	double GetTotSquared(const T* output, const T* target, size_t numSamples) override
+	double GetMeanLoss(const T* output, const T* target, size_t numSamples) override
 	{
 		double totEnergy = 0;
 
@@ -95,6 +95,6 @@ public:
 			tot += (diff * diff);
 		}
 
-		return (tot / totEnergy) * static_cast<double>(numSamples);
+		return (tot / totEnergy);
 	}
 };
