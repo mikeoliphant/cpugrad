@@ -22,17 +22,16 @@ namespace cpugrad
             }
 
 		    template <int Channels>
-            ChannelBufferDynamic<T, Channels> GetBuffer(size_t numCols)
+            void GetBuffer(ChannelBufferDynamic<T, Channels>& buf, size_t numCols)
 		    {
-                ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(stepArena.allocate(Channels * numCols * sizeof(T), CHANNEL_BUFFER_ALIGN)), numCols);
-
-                return buf;
+                if (buf.GetNumCols() == 0)
+                    buf = ChannelBufferDynamic<T, Channels>(static_cast<T*>(stepArena.allocate(Channels * numCols * sizeof(T), CHANNEL_BUFFER_ALIGN)), numCols);
 		    }
 
             template <int Channels>
             ChannelBufferDynamic<T, Channels> GetScratchBuffer(size_t numCols)
             {
-                //ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(scratchPool.allocate(Channels * numCols * sizeof(T), SIMD_ALIGN)), numCols);
+                //ChannelBufferDynamic<T, Channels> buf(static_cast<T*>(scratchPool.allocate(Channels * numCols * sizeof(T), CHANNEL_BUFFER_ALIGN)), numCols);
                 
                 if ((Channels * numCols) > maxScratchSize)
                     throw std::runtime_error("Tried to allocate a buffer > maxScratchSize");

@@ -56,7 +56,7 @@ namespace cpugrad
 			std::mt19937 gen;
 	};
 
-	template <typename T, typename ModelType, typename LossType = MSELossT<T>>
+	template <typename T, typename ModelType, typename LossType>
 	class TrainerWorkerT;
 
 	template <typename T, typename ModelType, typename LossType = MSELossT<T>, typename LossEvalType = ESRLossT<T>>
@@ -335,8 +335,8 @@ namespace cpugrad
 		private:
 			size_t trainingSize = 8192;
 			std::mt19937 rand;
-			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
-			TrainerWorkerT<T, ModelType>* mainWorker;
+			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType, LossType>>> modelTrainerWorkers;
+			TrainerWorkerT<T, ModelType, LossType>* mainWorker;
 			ModelType* modelBackprop;
 			LossType lossFunction;
 			LossEvalType lossEvalFunction;
@@ -357,7 +357,7 @@ namespace cpugrad
 				optimizer(),
 				bufferArena(modelBackprop->GetMaxScratchBufferSize(trainingSize))
 			{
-				this->modelBackprop->SetTrainingContext(this);
+				this->modelBackprop->SetTrainingContext(this); //static_cast<TrainingContextT<T>*>(static_cast<void*>(this)));	// ** this is gross, and should be fixed by resolving the declaration order hellscape
 			}
 
 			ModelType* GetModel()
@@ -447,26 +447,17 @@ namespace cpugrad
 						size_t receptiveField = modelBackprop->GetReceptiveField();
 						size_t outputSize = numSamples - receptiveField;
 
-						if (batchInput.GetNumCols() == 0)
-						{
-							batchInput = bufferArena.template GetBuffer<1>(numSamples);
-						}
+						bufferArena.template GetBuffer<1>(batchInput, numSamples);
 
 						float* batchInPtr = batchInput.GetData();
 						std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
 
-						if (batchTarget.GetNumCols() == 0)
-						{
-							batchTarget = bufferArena.template GetBuffer<1>(outputSize);
-						}
+						bufferArena.template GetBuffer<1>(batchTarget, outputSize);
 
 						auto batchTargetPtr = batchTarget.GetData();
 						std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
 
-						if (forwardOutput.GetNumCols() == 0)
-						{
-							forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
-						}
+						bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
 
 						forwardOutput.SetZero();
 
@@ -474,10 +465,8 @@ namespace cpugrad
 						modelBackprop->Forward(batchInput, forwardOutput);
 						forwardDuration += (Clock::now() - forwardStart);
 
-						if (outputGradient.GetNumCols() == 0)
-						{
-							outputGradient = bufferArena.template GetBuffer<1>(outputSize);
-						}
+
+						bufferArena.template GetBuffer<1>(outputGradient, outputSize);
 
 						ApplyHPF(batchTargetPtr, outputSize);
 						ApplyHPF(forwardOutput.GetData(), outputSize);
@@ -509,15 +498,9 @@ namespace cpugrad
 				size_t batchSize = outputSize + receptiveField;
 				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
 
-				if (forwardOutput.GetNumCols() == 0)
-				{
-					forwardOutput = bufferArena.template GetBuffer<1>(outputSize);
-				}
+				bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
 
-				if (batchInput.GetNumCols() == 0)
-				{
-					batchInput = bufferArena.template GetBuffer<1>(batchSize);
-				}
+				bufferArena.template GetBuffer<1>(batchInput, batchSize);
 
 				while (currentOffset < totalSamples)
 				{

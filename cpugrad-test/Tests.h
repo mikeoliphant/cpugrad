@@ -20,19 +20,16 @@ public:
 		const size_t offset = conv.GetReceptiveField();
 		const size_t numSamplesOut = numSamplesIn - offset;
 
-		if (rechannelOut.GetNumCols() == 0)
-			rechannelOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamplesIn);
+		trainingContext->GetBufferArena().template GetBuffer<Channels>(rechannelOut, numSamplesIn);
 
 		rechannel.Forward(input, rechannelOut);
 
-		if (convOut.GetNumCols() == 0)
-			convOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamplesOut);
+		trainingContext->GetBufferArena().template GetBuffer<Channels>(convOut, numSamplesOut);
 
 		convOut.SetZero();
 		conv.Forward(rechannelOut, convOut);
 
-		if (reluOut.GetNumCols() == 0)
-			reluOut = trainingContext->GetBufferArena().template GetBuffer<Channels>(numSamplesOut);
+		trainingContext->GetBufferArena().template GetBuffer<Channels>(reluOut, numSamplesOut);
 
 		relu.Forward(convOut, reluOut);
 
@@ -130,8 +127,7 @@ public:
 		size_t numSamples = input.GetNumCols();
 
 		numSamples -= conv1.GetReceptiveField();
-		if (conv1Out.GetNumCols() == 0)
-			conv1Out = trainingContext->GetBufferArena().template GetBuffer<InOutChannels>(numSamples);
+		trainingContext->GetBufferArena().template GetBuffer<InOutChannels>(conv1Out, numSamples);
 
 		conv1Out.SetZero();
 		conv1.Forward(input, conv1Out);

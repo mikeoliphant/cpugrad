@@ -27,7 +27,6 @@ int main()
 	auto delayData = dataGen.GenerateDelay(256, numSamples);
 	auto xorData = dataGen.GenerateXOR(1, numSamples);
 
-
 	//auto denseTrainer = new ModelTrainerT<float, DenseBackpropT<float, 1, 1, false>>();
 
 	//denseTrainer->TestBackprop(0, randData.data(), randData.data(), MAX_BATCH_SIZE);
