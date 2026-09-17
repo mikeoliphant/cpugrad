@@ -12,6 +12,7 @@
 #include "Platform.h"
 #include "Optimizer.h"
 #include "Loss.h"
+#include "MrStft.h"
 
 namespace cpugrad
 {
@@ -357,7 +358,7 @@ namespace cpugrad
 				optimizer(),
 				bufferArena(modelBackprop->GetMaxScratchBufferSize(trainingSize))
 			{
-				this->modelBackprop->SetTrainingContext(this); //static_cast<TrainingContextT<T>*>(static_cast<void*>(this)));	// ** this is gross, and should be fixed by resolving the declaration order hellscape
+				this->modelBackprop->SetTrainingContext(static_cast<TrainingContextT<T>*>(this));
 			}
 
 			ModelType* GetModel()

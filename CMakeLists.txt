@@ -15,13 +15,17 @@ set(SOURCES
 	cpugrad/Dense.h
 	cpugrad/Conv1D.h
 	cpugrad/Loss.h
+	cpugrad/MrStft.h
 	cpugrad/Dataset.h
 	cpugrad/Optimizer.h
 	cpugrad/BatchBuffer.h
-	cpugrad/Platform.h)
+	cpugrad/Platform.h
+	deps/AudioFFT/AudioFFT.cpp)
 
 add_library(cpugrad ${SOURCES})
 target_include_directories(cpugrad PUBLIC deps/NeuralAudio/NeuralAudio)
+target_include_directories(cpugrad PRIVATE deps/AudioFFT)
+
 target_link_libraries(cpugrad PUBLIC NeuralAudio)
 
 source_group(cpugrad ${CMAKE_CURRENT_SOURCE_DIR} FILES ${SOURCES})
