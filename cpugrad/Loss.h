@@ -28,7 +28,7 @@ public:
 
 		for (size_t t = 0; t < numSamples; t++)
 		{
-			outGradient[t] = static_cast<T>(T(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
+			outGradient[t] += static_cast<T>(T(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 		}
 	}
 
@@ -72,7 +72,7 @@ public:
 
 		for (size_t t = 0; t < numSamples; t++)
 		{
-			outGradient[t] = static_cast<T>(T(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
+			outGradient[t] += static_cast<T>(T(2) * (static_cast<double>(output[t]) - static_cast<double>(target[t])) * scale);
 		}
 	}
 
@@ -97,4 +97,29 @@ public:
 
 		return (tot / totEnergy);
 	}
+};
+
+template <typename T, typename LossType1, typename LossType2>
+class JointLossT : public LossT<T>
+{
+	public:
+		JointLossT()
+		{
+			this->name = loss1.GetName() + "/"  + loss2.GetName();
+		}
+
+		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) override
+		{
+			loss1.ComputeLoss(output, target, outGradient, numSamples, scaleFactor);
+			loss2.ComputeLoss(output, target, outGradient, numSamples, scaleFactor);
+		}
+
+		double GetMeanLoss(const T* output, const T* target, size_t numSamples) override
+		{
+			return loss1.GetMeanLoss(output, target, numSamples) + loss2.GetMeanLoss(output, target, numSamples);
+		}
+
+	private:
+		LossType1 loss1;
+		LossType2 loss2;	
 };
