@@ -147,13 +147,9 @@ public:
 
             size_t frameOffset = (fftSize - windowSize) / 2;
             const auto& currentHannWindow = hannWindows[c];
+            auto& engine = const_cast<std::vector<std::unique_ptr<audiofft::AudioFFT>>&>(fftEngines)[c];
 
-            std::vector<std::vector<float>> targetMagsAll(outputFrames, std::vector<float>(freqBins));
-            std::vector<std::vector<float>> outputMagsAll(outputFrames, std::vector<float>(freqBins));
-            std::vector<std::vector<float>> outputRealAll(outputFrames, std::vector<float>(freqBins));
-            std::vector<std::vector<float>> outputImagAll(outputFrames, std::vector<float>(freqBins));
-
-            // --- STEP 1: Forward Pass (Identical to your verified logic) ---
+            // --- PASS 1: Lightweight Forward Pass to gather global scalars ---
             for (size_t frame = 0; frame < outputFrames; frame++)
             {
                 size_t sampleStart = frame * hopSize;
@@ -172,8 +168,6 @@ public:
                     outputFrame[frameOffset + i] = outputSample * currentHannWindow[i];
                 }
 
-                auto& engine = const_cast<std::vector<std::unique_ptr<audiofft::AudioFFT>>&>(fftEngines)[c];
-
                 engine->fft(targetFrame.data(), targetReal.data(), targetImag.data());
                 engine->fft(outputFrame.data(), outputReal.data(), outputImag.data());
 
@@ -185,23 +179,13 @@ public:
                     float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
                     float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
 
-                    float spectralScale = (k == 0 || k == freqBins - 1) ? 1.0f : 2.0f;
-
-                    targetMag *= spectralScale;
-                    outputMag *= spectralScale;
-
-                    targetMagsAll[frame][k] = targetMag;
-                    outputMagsAll[frame][k] = outputMag;
-                    outputRealAll[frame][k] = outputReal[k];
-                    outputImagAll[frame][k] = outputImag[k];
-
                     float magDiff = targetMag - outputMag;
                     frobeniusDiff += magDiff * magDiff;
                     frobeniusTarget += targetMag * targetMag;
                 }
             }
 
-            // --- STEP 2: Adjoint Backpropagation Pass ---
+            // --- PASS 2: Adjoint Backpropagation Pass (Zero allocations inside) ---
             double sqrtDiff = std::sqrt(frobeniusDiff);
             double sqrtTarget = std::sqrt(frobeniusTarget);
             double logDenom = static_cast<double>(outputFrames * freqBins);
@@ -210,44 +194,70 @@ public:
             {
                 size_t sampleStart = frame * hopSize;
 
-                std::fill(targetReal.begin(), targetReal.begin() + freqBins, 0.0f);
-                std::fill(targetImag.begin(), targetImag.begin() + freqBins, 0.0f);
+                std::fill(targetFrame.begin(), targetFrame.begin() + fftSize, 0.0f);
+                std::fill(outputFrame.begin(), outputFrame.begin() + fftSize, 0.0f);
 
+                for (size_t i = 0; i < windowSize; ++i)
+                {
+                    size_t paddedIdx = sampleStart + frameOffset + i;
+
+                    float targetSample = GetReflectSample(target, numSamples, paddedIdx, padSize);
+                    float outputSample = GetReflectSample(output, numSamples, paddedIdx, padSize);
+
+                    targetFrame[frameOffset + i] = targetSample * currentHannWindow[i];
+                    outputFrame[frameOffset + i] = outputSample * currentHannWindow[i];
+                }
+
+                // Recompute forward FFT components to restore local spectral states on the fly
+                engine->fft(targetFrame.data(), targetReal.data(), targetImag.data());
+                engine->fft(outputFrame.data(), outputReal.data(), outputImag.data());
+
+                // Read cached values into local registers then OVERWRITE targetReal and targetImag 
+                // to serve as our zero-allocation complex gradient buffers before IFFT
                 for (size_t k = 0; k < freqBins; k++)
                 {
-                    float targetMag = targetMagsAll[frame][k];
-                    float outputMag = outputMagsAll[frame][k];
-                    float outReal = outputRealAll[frame][k];
-                    float outImag = outputImagAll[frame][k];
+                    float outReal = outputReal[k];
+                    float outImag = outputImag[k];
+                    float tReal = targetReal[k];
+                    float tImag = targetImag[k];
 
-                    // 1. Derivative of Spectral Convergence with respect to outputMag
-                    double dScDMag = 0.0;
-                    if (sqrtTarget > 0 && sqrtDiff > 0)
+                    float rawTargetPower = tReal * tReal + tImag * tImag;
+                    float rawOutputPower = outReal * outReal + outImag * outImag;
+
+                    float targetMag = std::sqrt(std::max(rawTargetPower, static_cast<float>(epsilon)));
+                    float outputMag = std::sqrt(std::max(rawOutputPower, static_cast<float>(epsilon)));
+
+                    double dLossDMag = 0.0;
+
+                    if (rawOutputPower > epsilon)
                     {
-                        double term1 = (outputMag - targetMag) / (sqrtDiff * sqrtTarget);
-                        double term2 = (sqrtDiff * outputMag) / (frobeniusTarget * sqrtTarget);
-                        dScDMag = (term1 - term2); // FIX: Removed spectralScale multiplication
+                        // 1. Derivative of Spectral Convergence w.r.t outputMag
+                        double dScDMag = 0.0;
+                        if (sqrtTarget > 0.0 && sqrtDiff > 0.0)
+                        {
+                            double term1 = (outputMag - targetMag) / (sqrtDiff * sqrtTarget);
+                            double term2 = (rawTargetPower > epsilon) ? ((sqrtDiff * outputMag) / (frobeniusTarget * sqrtTarget)) : 0.0;
+
+                            dScDMag = (term1 - term2);
+                        }
+
+                        // 2. Derivative of Log Magnitude w.r.t outputMag
+                        double dLogDMag = 0.0;
+                        if (outputMag > 0.0)
+                        {
+                            double sign = (outputMag > targetMag) ? 1.0 : ((outputMag < targetMag) ? -1.0 : 0.0);
+                            dLogDMag = (sign / (logDenom * outputMag));
+                        }
+
+                        dLossDMag = (dScDMag + dLogDMag) * globalScale * (static_cast<double>(fftSize) * 0.5);
                     }
 
-                    // 2. Derivative of Log Magnitude with respect to outputMag
-                    double dLogDMag = 0.0;
-                    if (outputMag > 0)
+                    // 3. Complex chain rule mapping directly into repurposed class workspace vectors
+                    if (rawOutputPower > epsilon)
                     {
-                        double sign = (outputMag > targetMag) ? 1.0 : ((outputMag < targetMag) ? -1.0 : 0.0);
-                        dLogDMag = (sign / (logDenom * outputMag)); // FIX: Removed spectralScale multiplication
-                    }
-
-                    // Accumulate linear magnitude derivative scaled by the forward/backward transform factor
-                    double dLossDMag = (dScDMag + dLogDMag) * globalScale * static_cast<double>(fftSize);
-
-                    // 3. Complex magnitude chain rule implementation
-                    float unscaledOutputPower = outReal * outReal + outImag * outImag;
-
-                    if (unscaledOutputPower > epsilon)
-                    {
-                        float outputRawMag = std::sqrt(unscaledOutputPower);
-                        targetReal[k] = static_cast<float>(dLossDMag * (outReal / outputRawMag));
-                        targetImag[k] = static_cast<float>(dLossDMag * (outImag / outputRawMag));
+                        float outputRawMag = std::sqrt(rawOutputPower);
+                        targetReal[k] = static_cast<float>(dLossDMag * (outReal / outputRawMag)); // Repurposed as Real Grad Workspace
+                        targetImag[k] = static_cast<float>(dLossDMag * (outImag / outputRawMag)); // Repurposed as Imag Grad Workspace
                     }
                     else
                     {
@@ -256,15 +266,14 @@ public:
                     }
                 }
 
-                // 4. Pass back through AudioFFT inverse engine
-                auto& engine = const_cast<std::vector<std::unique_ptr<audiofft::AudioFFT>>&>(fftEngines)[c];
-                engine->ifft(outputFrame.data(), targetReal.data(), targetImag.data());
+                // 4. Pass back through AudioFFT inverse engine 
+                engine->ifft(targetFrame.data(), targetReal.data(), targetImag.data());
 
-                // 5. Symmetric window weighting and accumulation back into time-domain outGradient array
+                // 5. Symmetric window weighting and accumulation back into master time-domain outGradient array
                 for (size_t i = 0; i < windowSize; ++i)
                 {
                     size_t paddedIdx = sampleStart + frameOffset + i;
-                    float windowedGradSample = outputFrame[frameOffset + i] * currentHannWindow[i];
+                    float windowedGradSample = targetFrame[frameOffset + i] * currentHannWindow[i];
 
                     AccumulateReflectGradient(outGradient, numSamples, paddedIdx, padSize, windowedGradSample);
                 }
@@ -331,12 +340,6 @@ public:
                     // FIX: Replicate auraloss clamping directly on the power spectrum before the sqrt
                     float targetMag = std::sqrt(std::max(targetPower, epsilon));
                     float outputMag = std::sqrt(std::max(outputPower, epsilon));
-
-                    // Apply PyTorch's 1-sided spectral energy doubling rule
-                    float spectralScale = (k == 0 || k == freqBins - 1) ? 1.0f : 2.0f;
-
-                    targetMag *= spectralScale;
-                    outputMag *= spectralScale;
 
                     // Spectral Convergence component
                     float magDiff = targetMag - outputMag;
