@@ -99,7 +99,7 @@ public:
 	}
 };
 
-template <typename T, typename LossType1, typename LossType2>
+template <typename T, typename LossType1, double Loss1Weight, typename LossType2, double Loss2Weight>
 class JointLossT : public LossT<T>
 {
 	public:
@@ -110,8 +110,8 @@ class JointLossT : public LossT<T>
 
 		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) override
 		{
-			loss1.ComputeLoss(output, target, outGradient, numSamples, scaleFactor);
-			loss2.ComputeLoss(output, target, outGradient, numSamples, scaleFactor);
+			loss1.ComputeLoss(output, target, outGradient, numSamples, scaleFactor * Loss1Weight);
+			loss2.ComputeLoss(output, target, outGradient, numSamples, scaleFactor * Loss2Weight);
 		}
 
 		double GetMeanLoss(const T* output, const T* target, size_t numSamples) override

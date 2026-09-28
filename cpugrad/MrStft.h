@@ -32,7 +32,6 @@ private:
     std::vector<float> targetFrame;
     std::vector<float> outputFrame;
     const T epsilon = static_cast<T>(1e-8);
-    const double baseScale = 0.0005; // hard-code weight for now
 
     std::vector<T> GenerateHannWindow(size_t size)
     {
@@ -127,7 +126,7 @@ public:
 
     void ComputeLoss(const T* __restrict output, const T* __restrict target, T* __restrict outGradient, size_t numSamples, double scaleFactor) override
     {
-        double globalScale = scaleFactor / static_cast<double>(configurations.size());
+        double globalScale = scaleFactor / (static_cast<double>(configurations.size() * numSamples));
 
         for (size_t c = 0; c < configurations.size(); c++)
         {

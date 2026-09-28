@@ -60,7 +60,8 @@ namespace cpugrad
 	template <typename T, typename ModelType, typename LossType>
 	class TrainerWorkerT;
 
-	template <typename T, typename ModelType, typename LossType = MSELossT<T>, typename LossEvalType = ESRLossT<T>>
+	template <typename T, typename ModelType, typename LossType = JointLossT<T, MSELossT<T>, 1.0, MultiResolutionStftLossT<T>, .0005>, typename LossEvalType = ESRLossT<T>>
+	//template <typename T, typename ModelType, typename LossType = MSELossT<T>, typename LossEvalType = ESRLossT<T>>
 	class ModelTrainerT
 	{
 		public:
@@ -474,7 +475,7 @@ namespace cpugrad
 
 						lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
 
-						//std::cout << "Batch loss: " << lossFunction.GetTotSquared(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
+						//std::cout << "Batch loss: " << lossFunction.GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
 
 						bufferArena.FreeScratchBuffer(batchTarget);
 
