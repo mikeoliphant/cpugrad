@@ -32,7 +32,7 @@ private:
     std::vector<float> targetFrame;
     std::vector<float> outputFrame;
     const T epsilon = static_cast<T>(1e-8);
-    const double baseScale = 1;// 0.0005; // hard-code weight for now
+    const double baseScale = 0.0005; // hard-code weight for now
 
     std::vector<T> GenerateHannWindow(size_t size)
     {
@@ -222,7 +222,7 @@ public:
 
                     // 1. Derivative of Spectral Convergence with respect to outputMag
                     double dScDMag = 0.0;
-                    if (sqrtTarget > 1e-11 && sqrtDiff > 1e-11)
+                    if (sqrtTarget > 0 && sqrtDiff > 0)
                     {
                         double term1 = (outputMag - targetMag) / (sqrtDiff * sqrtTarget);
                         double term2 = (sqrtDiff * outputMag) / (frobeniusTarget * sqrtTarget);
@@ -231,7 +231,7 @@ public:
 
                     // 2. Derivative of Log Magnitude with respect to outputMag
                     double dLogDMag = 0.0;
-                    if (outputMag > 1e-11)
+                    if (outputMag > 0)
                     {
                         double sign = (outputMag > targetMag) ? 1.0 : ((outputMag < targetMag) ? -1.0 : 0.0);
                         dLogDMag = (sign / (logDenom * outputMag)); // FIX: Removed spectralScale multiplication
@@ -242,6 +242,7 @@ public:
 
                     // 3. Complex magnitude chain rule implementation
                     float unscaledOutputPower = outReal * outReal + outImag * outImag;
+
                     if (unscaledOutputPower > epsilon)
                     {
                         float outputRawMag = std::sqrt(unscaledOutputPower);

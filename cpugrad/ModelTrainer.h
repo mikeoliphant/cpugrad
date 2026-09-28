@@ -60,7 +60,7 @@ namespace cpugrad
 	template <typename T, typename ModelType, typename LossType>
 	class TrainerWorkerT;
 
-	template <typename T, typename ModelType, typename LossType = JointLossT<T, MSELossT<T>, MultiResolutionStftLossT<T>>, typename LossEvalType = MultiResolutionStftLossT<T>>
+	template <typename T, typename ModelType, typename LossType = MSELossT<T>, typename LossEvalType = ESRLossT<T>>
 	class ModelTrainerT
 	{
 		public:
