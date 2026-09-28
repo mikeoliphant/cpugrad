@@ -462,14 +462,15 @@ namespace cpugrad
 						forwardDuration += (Clock::now() - forwardStart);
 
 						auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
+						outputGradient.SetZero();
 
 						auto batchTarget = bufferArena.template GetScratchBuffer<1>(outputSize);
 
 						auto batchTargetPtr = batchTarget.GetData();
 						std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
 
-						ApplyHPF(batchTargetPtr, outputSize);
-						ApplyHPF(forwardOutput.GetData(), outputSize);
+						//ApplyHPF(batchTargetPtr, outputSize);
+						//ApplyHPF(forwardOutput.GetData(), outputSize);
 
 						lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
 
@@ -582,6 +583,7 @@ namespace cpugrad
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput);
 
 				auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
+				outputGradient.SetZero();
 
 				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 1.0f);
 

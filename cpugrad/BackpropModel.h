@@ -218,12 +218,10 @@ namespace cpugrad
 					const float* outT = outPtr + (t * OutChannels);
 					const float* inT = inPtr + (t * InChannels);
 
-#pragma unroll
 					for (int j = 0; j < InChannels; j++)
 					{
 						const float xVal = inT[j];
 
-#pragma unroll
 						for (int i = 0; i < OutChannels; i++)
 						{
 							dWLocal[i + j * OutChannels] += outT[i] * xVal;
@@ -231,7 +229,6 @@ namespace cpugrad
 					}
 				}
 
-#pragma unroll
 				for (int k = 0; k < OutChannels * InChannels; k++)
 				{
 					dWPtr[k] += dWLocal[k];
