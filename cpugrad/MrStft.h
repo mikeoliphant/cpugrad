@@ -18,18 +18,6 @@ struct StftWindowConfig
     size_t WindowSize;
 };
 
-#include <vector>
-#include <cmath>
-#include <numbers>
-#include <algorithm>
-#include <memory>
-#include "AudioFFT.h" // Assuming AudioFFT engine header mapping
-
-#include <vector>
-#include <cmath>
-#include <numbers>
-#include <algorithm>
-
 template <typename T>
 class StftFrameProcessor
 {
@@ -337,7 +325,6 @@ public:
             // Instantiating our lightweight per-scale processor state matching ComputeLoss
             stftProcessors[c]->SetNumSamples(numSamples);
 
-            size_t fftSize = configurations[c].FftSize;
             size_t outputFrames = stftProcessors[c]->GetOutputFrames();
             size_t freqBins = stftProcessors[c]->GetFreqBins();
 
