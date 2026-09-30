@@ -116,44 +116,10 @@ class JointLossT : public LossT<T>
 
 		double GetMeanLoss(const T* output, const T* target, size_t numSamples) override
 		{
-			return loss1.GetMeanLoss(output, target, numSamples) + loss2.GetMeanLoss(output, target, numSamples);
+			return (loss1.GetMeanLoss(output, target, numSamples) * Loss1Weight) + (loss2.GetMeanLoss(output, target, numSamples) * Loss2Weight);
 		}
 
 	private:
 		LossType1 loss1;
 		LossType2 loss2;	
-};
-
-template <typename T, typename LossType1, typename LossType2, double threshold>
-class JointSecondaryLossT : public LossT<T>
-{
-public:
-	JointSecondaryLossT()
-	{
-		this->name = loss1.GetName() + "/" + loss2.GetName();
-	}
-
-	void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) override
-	{
-		loss1.ComputeLoss(output, target, outGradient, numSamples, scaleFactor);
-
-		if (loss1.GetMeanLoss(output, target, numSamples) < threshold)
-		{
-			loss2.ComputeLoss(output, target, outGradient, numSamples, scaleFactor);
-		}
-	}
-
-	double GetMeanLoss(const T* output, const T* target, size_t numSamples) override
-	{
-		double meanLoss1 = loss1.GetMeanLoss(output, target, numSamples);
-
-		if (meanLoss1 >= threshold)
-			return meanLoss1;
-
-		return meanLoss1 + loss2.GetMeanLoss(output, target, numSamples);
-	}
-
-private:
-	LossType1 loss1;
-	LossType2 loss2;
 };
