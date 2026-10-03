@@ -261,7 +261,7 @@ public:
             // --- PASS 2: Adjoint Backpropagation Pass ---
             double sqrtDiff = std::sqrt(frobeniusDiff);
             double sqrtTarget = std::sqrt(frobeniusTarget);
-            double logDenom = static_cast<double>(outputFrames * (freqBins - 1));
+            double logDenom = static_cast<double>(outputFrames * freqBins);
 
             for (size_t frame = 0; frame < outputFrames; frame++)
             {
@@ -375,7 +375,7 @@ public:
             float spectralConvergence = (frobeniusTarget > 0.0) ? static_cast<float>(std::sqrt(frobeniusDiff) / std::sqrt(frobeniusTarget)) : 0.0f;
 
             // Match the exact Log Magnitude denominator mapping rule used in ComputeLoss
-            float logMagnitudeLoss = static_cast<float>(l1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins - 1)));
+            float logMagnitudeLoss = static_cast<float>(l1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
 
             //std::cout << "fft: " << fftSize << " spec: " << spectralConvergence << " logmag: " << logMagnitudeLoss << std::endl;
 
