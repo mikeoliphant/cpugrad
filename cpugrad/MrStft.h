@@ -29,14 +29,16 @@ public:
         numSamples(0), paddedLength(0), outputFrames(0),
         fftEngine()
     {
+        frameOverlapNormalization = CalculateFrameOverlapNormalization();
+
         fftEngine.init(fftSize);
 
-        // Pre-compute the SciPy-matching symmetric Hann Window up front once
         hannWindow.resize(windowSize);
 
         if (windowSize > 1)
         {
-            const float denominator = static_cast<float>(windowSize - 1);
+            // Periodic (not symmetric!) Hann window
+            const float denominator = static_cast<float>(windowSize);
 
             for (size_t i = 0; i < windowSize; ++i)
             {
@@ -93,6 +95,15 @@ public:
     }
 
 private:
+    double CalculateFrameOverlapNormalization() noexcept
+    {
+        double overlapRatio = static_cast<double>(windowSize) / static_cast<double>(hopSize);
+        double linearOverlapSum = 0.5 * overlapRatio;
+        double squaredOverlapSum = 0.375 * overlapRatio;
+
+        return (linearOverlapSum / squaredOverlapSum) * 0.5;
+    }
+
     inline float GetReflectSample(const T* audio, size_t paddedIdx) const
     {
         if (paddedIdx < padSize)
@@ -146,6 +157,7 @@ private:
     size_t freqBins;
     size_t padSize;
     size_t frameOffset;
+    double frameOverlapNormalization;
 
     // Dynamic tracking elements calculated on SetNumSamples() execution invocation
     size_t numSamples;
