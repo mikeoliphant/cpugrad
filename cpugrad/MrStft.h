@@ -287,31 +287,31 @@ public:
                     if (rawOutputPower > epsilon)
                     {
                         double dScDMag = 0.0;
+
                         if (sqrtTarget > 0.0 && sqrtDiff > 0.0)
                         {
                             double term1 = (outputMag - targetMag) / (sqrtDiff * sqrtTarget);
-                            double term2 = (rawTargetPower > epsilon) ? ((sqrtDiff * outputMag) / (frobeniusTarget * sqrtTarget)) : 0.0;
+                            double term2 = (sqrtDiff * outputMag) / (frobeniusTarget * sqrtTarget);
                             dScDMag = (term1 - term2);
                         }
 
                         double dLogDMag = 0.0;
-                        if (outputMag > epsilon)
+
+                        double magDifference = static_cast<double>(outputMag - targetMag);
+
+                        double sign = 0.0;
+
+                        if (std::abs(magDifference) > epsilon)
                         {
-                            double magDifference = static_cast<double>(outputMag - targetMag);
-                            double sign = 0.0;
-                            if (std::abs(magDifference) > epsilon)
-                            {
-                                sign = (magDifference > 0.0) ? 1.0 : -1.0;
-                            }
-                            dLogDMag = (sign / (logDenom * outputMag));
+                            sign = (magDifference > 0.0) ? 1.0 : -1.0;
                         }
 
-                        dLossDMag = (dScDMag + dLogDMag) * (static_cast<double>(fftSize) * 0.5);
-                    }
+                        dLogDMag = (sign / (logDenom * outputMag));
 
-                    if (rawOutputPower > epsilon)
-                    {
+                        dLossDMag = (dScDMag + dLogDMag) * (static_cast<double>(fftSize) * 0.5);
+
                         float outputRawMag = std::sqrt(rawOutputPower);
+
                         targetReal[k] = static_cast<float>(dLossDMag * (outReal / outputRawMag));
                         targetImag[k] = static_cast<float>(dLossDMag * (outImag / outputRawMag));
                     }
