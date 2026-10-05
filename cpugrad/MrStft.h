@@ -288,12 +288,11 @@ public:
                     {
                         double dScDMag = 0.0;
 
-                        if (sqrtTarget > 0.0 && sqrtDiff > 0.0)
-                        {
-                            double term1 = (outputMag - targetMag) / (sqrtDiff * sqrtTarget);
-                            double term2 = (sqrtDiff * outputMag) / (frobeniusTarget * sqrtTarget);
-                            dScDMag = (term1 - term2);
-                        }
+                        double denominator = sqrtDiff * sqrtTarget;
+                        double safe_denominator = std::max(denominator, static_cast<double>(epsilon));
+
+                        // No nested branches required; safe against perfect prediction and silent targets
+                        dScDMag = (outputMag - targetMag) / safe_denominator;
 
                         double dLogDMag = 0.0;
 
@@ -310,10 +309,8 @@ public:
 
                         dLossDMag = (dScDMag + dLogDMag) * (static_cast<double>(fftSize) * 0.5);
 
-                        float outputRawMag = std::sqrt(rawOutputPower);
-
-                        targetReal[k] = static_cast<float>(dLossDMag * (outReal / outputRawMag));
-                        targetImag[k] = static_cast<float>(dLossDMag * (outImag / outputRawMag));
+                        targetReal[k] = static_cast<float>(dLossDMag * (outReal / outputMag));
+                        targetImag[k] = static_cast<float>(dLossDMag * (outImag / outputMag));
                     }
                     else
                     {
@@ -377,7 +374,7 @@ public:
             // Match the exact Log Magnitude denominator mapping rule used in ComputeLoss
             float logMagnitudeLoss = static_cast<float>(l1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
 
-            //std::cout << "fft: " << fftSize << " spec: " << spectralConvergence << " logmag: " << logMagnitudeLoss << std::endl;
+            //std::cout << "fft: " << configurations[c].FftSize << " spec: " << spectralConvergence << " logmag: " << logMagnitudeLoss << std::endl;
 
             // Auraloss sums the two sub-losses per scale
             totalMrLoss += (spectralConvergence + logMagnitudeLoss);
