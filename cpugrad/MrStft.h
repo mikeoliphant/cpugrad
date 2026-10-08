@@ -168,6 +168,12 @@ private:
     std::vector<float> hannWindow;
 };
 
+struct StftLossMetrics
+{
+    double FrobeniusDiff;
+    double FrobeniusTarget;
+    double L1LogDiff;
+};
 
 template <typename T>
 class MultiResolutionStftLossT : public LossT<T>
@@ -223,6 +229,34 @@ public:
     MultiResolutionStftLossT(MultiResolutionStftLossT&&) noexcept = default;
     MultiResolutionStftLossT& operator=(MultiResolutionStftLossT&&) noexcept = default;
 
+    StftLossMetrics ComputeForwardMetricsForScale(size_t c, const T* output, const T* target, size_t outputFrames, size_t freqBins)
+    {
+        StftLossMetrics metrics = { 0.0, 0.0, 0.0 };
+
+        for (size_t frame = 0; frame < outputFrames; frame++)
+        {
+            stftProcessors[c]->ProcessForwardFrame(target, frame, targetFrame, targetReal, targetImag);
+            stftProcessors[c]->ProcessForwardFrame(output, frame, outputFrame, outputReal, outputImag);
+
+            for (size_t k = 0; k < freqBins; k++)
+            {
+                float targetPower = targetReal[k] * targetReal[k] + targetImag[k] * targetImag[k];
+                float outputPower = outputReal[k] * outputReal[k] + outputImag[k] * outputImag[k];
+
+                float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
+                float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
+
+                float magDiff = targetMag - outputMag;
+                metrics.FrobeniusDiff += magDiff * magDiff;
+                metrics.FrobeniusTarget += targetMag * targetMag;
+
+                metrics.L1LogDiff += std::abs(std::log(targetMag) - std::log(outputMag));
+            }
+        }
+
+        return metrics;
+    }
+
     void ComputeLoss(const T* __restrict output, const T* __restrict target, T* __restrict outGradient, size_t numSamples, double scaleFactor) override
     {
         double globalScale = scaleFactor / (static_cast<double>(configurations.size() * numSamples));
@@ -235,33 +269,14 @@ public:
             size_t outputFrames = stftProcessors[c]->GetOutputFrames();
             size_t freqBins = stftProcessors[c]->GetFreqBins();
 
-            double frobeniusDiff = 0.0;
-            double frobeniusTarget = 0.0;
-
-            // --- PASS 1: Forward Pass (Using Per-Frame Processor) ---
-            for (size_t frame = 0; frame < outputFrames; frame++)
-            {
-                stftProcessors[c]->ProcessForwardFrame(target, frame, targetFrame, targetReal, targetImag);
-                stftProcessors[c]->ProcessForwardFrame(output, frame, outputFrame, outputReal, outputImag);
-
-                for (size_t k = 0; k < freqBins; k++)
-                {
-                    float targetPower = targetReal[k] * targetReal[k] + targetImag[k] * targetImag[k];
-                    float outputPower = outputReal[k] * outputReal[k] + outputImag[k] * outputImag[k];
-
-                    float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
-                    float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
-
-                    float magDiff = targetMag - outputMag;
-                    frobeniusDiff += magDiff * magDiff;
-                    frobeniusTarget += targetMag * targetMag;
-                }
-            }
+            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, output, target, outputFrames, freqBins);
 
             // --- PASS 2: Adjoint Backpropagation Pass ---
-            double sqrtDiff = std::sqrt(frobeniusDiff);
-            double sqrtTarget = std::sqrt(frobeniusTarget);
+            double sqrtDiff = std::sqrt(metrics.FrobeniusDiff);
+            double sqrtTarget = std::sqrt(metrics.FrobeniusTarget);
             double logDenom = static_cast<double>(outputFrames * freqBins);
+            double denominator = sqrtDiff * sqrtTarget;
+            double safe_denominator = std::max(denominator, static_cast<double>(epsilon));
 
             for (size_t frame = 0; frame < outputFrames; frame++)
             {
@@ -288,10 +303,6 @@ public:
                     {
                         double dScDMag = 0.0;
 
-                        double denominator = sqrtDiff * sqrtTarget;
-                        double safe_denominator = std::max(denominator, static_cast<double>(epsilon));
-
-                        // No nested branches required; safe against perfect prediction and silent targets
                         dScDMag = (outputMag - targetMag) / safe_denominator;
 
                         double dLogDMag = 0.0;
@@ -300,17 +311,17 @@ public:
 
                         double sign = 0.0;
 
-                        if (std::abs(magDifference) > epsilon)
+                        if (std::abs(magDifference) > 0)
                         {
                             sign = (magDifference > 0.0) ? 1.0 : -1.0;
-                        }
 
-                        dLogDMag = (sign / (logDenom * outputMag));
+                            dLogDMag = (sign / (logDenom * outputMag));
+                        }
 
                         dLossDMag = (dScDMag + dLogDMag) * (static_cast<double>(fftSize) * 0.5);
 
-                        targetReal[k] = static_cast<float>(dLossDMag * (outReal / outputMag));
-                        targetImag[k] = static_cast<float>(dLossDMag * (outImag / outputMag));
+                        targetReal[k] = static_cast<float>(dLossDMag * outReal / outputMag);
+                        targetImag[k] = static_cast<float>(dLossDMag * outImag / outputMag);
                     }
                     else
                     {
@@ -331,56 +342,19 @@ public:
 
         for (size_t c = 0; c < configurations.size(); c++)
         {
-            // Instantiating our lightweight per-scale processor state matching ComputeLoss
             stftProcessors[c]->SetNumSamples(numSamples);
 
             size_t outputFrames = stftProcessors[c]->GetOutputFrames();
             size_t freqBins = stftProcessors[c]->GetFreqBins();
 
-            double frobeniusDiff = 0.0;
-            double frobeniusTarget = 0.0;
-            double l1LogDiff = 0.0;
+            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, output, target, outputFrames, freqBins);
 
-            // --- PASS 1: Lightweight Forward Pass using the Per-Frame Processor ---
-            for (size_t frame = 0; frame < outputFrames; frame++)
-            {
-                // Re-use our class-level pre-allocated scratchpad variables safely via reference
-                stftProcessors[c]->ProcessForwardFrame(target, frame, targetFrame, targetReal, targetImag);
-                stftProcessors[c]->ProcessForwardFrame(output, frame, outputFrame, outputReal, outputImag);
+            float spectralConvergence = (metrics.FrobeniusTarget > 0.0) ? static_cast<float>(std::sqrt(metrics.FrobeniusDiff) / std::sqrt(metrics.FrobeniusTarget)) : 0.0f;
+            float logMagnitudeLoss = static_cast<float>(metrics.L1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
 
-                // Frame-level reduction limited strictly to current freqBins
-                for (size_t k = 0; k < freqBins; k++)
-                {
-                    float targetPower = targetReal[k] * targetReal[k] + targetImag[k] * targetImag[k];
-                    float outputPower = outputReal[k] * outputReal[k] + outputImag[k] * outputImag[k];
-
-                    // Replicate auraloss clamping directly on the power spectrum before the sqrt
-                    float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
-                    float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
-
-                    // Spectral Convergence component
-                    float magDiff = targetMag - outputMag;
-                    frobeniusDiff += magDiff * magDiff;
-                    frobeniusTarget += targetMag * targetMag;
-
-                    // Log STFT Magnitude component
-                    l1LogDiff += std::abs(std::log(targetMag) - std::log(outputMag));
-                }
-            }
-
-            // Finalize loss components for this resolution scale
-            float spectralConvergence = (frobeniusTarget > 0.0) ? static_cast<float>(std::sqrt(frobeniusDiff) / std::sqrt(frobeniusTarget)) : 0.0f;
-
-            // Match the exact Log Magnitude denominator mapping rule used in ComputeLoss
-            float logMagnitudeLoss = static_cast<float>(l1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
-
-            //std::cout << "fft: " << configurations[c].FftSize << " spec: " << spectralConvergence << " logmag: " << logMagnitudeLoss << std::endl;
-
-            // Auraloss sums the two sub-losses per scale
             totalMrLoss += (spectralConvergence + logMagnitudeLoss);
         }
 
-        // Return the mean MR-STFT loss across all configurations
         return totalMrLoss / static_cast<float>(configurations.size());
     }
-};
+ };
