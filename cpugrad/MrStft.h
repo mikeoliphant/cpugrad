@@ -189,10 +189,12 @@ private:
     std::vector<float> targetFrame;
     std::vector<float> outputFrame;
     const T epsilon = static_cast<T>(1e-8);
+    double specWeight = 1.0;
+    double logMagWeight = 1.0;
 
 public:
-    MultiResolutionStftLossT() :
-        configurations({ { 2048, 240, 1200 }, { 1024, 120, 600 }, {512, 50, 240} })
+    MultiResolutionStftLossT(std::vector<StftWindowConfig> configs = { { 2048, 240, 1200 }, { 1024, 120, 600 }, {512, 50, 240} }) :
+        configurations(configs)
     {
         this->name = "MR-STFT";
 
@@ -228,6 +230,12 @@ public:
     // Maintain move safety
     MultiResolutionStftLossT(MultiResolutionStftLossT&&) noexcept = default;
     MultiResolutionStftLossT& operator=(MultiResolutionStftLossT&&) noexcept = default;
+
+    void SetWeights(double specWeight, double logMagWeight)
+    {
+        this->specWeight = specWeight;
+        this->logMagWeight = logMagWeight;
+    }
 
     StftLossMetrics ComputeForwardMetricsForScale(size_t c, const T* output, const T* target, size_t outputFrames, size_t freqBins)
     {
@@ -318,7 +326,7 @@ public:
                             dLogDMag = (sign / (logDenom * outputMag));
                         }
 
-                        dLossDMag = (dScDMag + dLogDMag) * (static_cast<double>(fftSize) * 0.5);
+                        dLossDMag = ((dScDMag * specWeight) + (dLogDMag * logMagWeight)) * (static_cast<double>(fftSize) * 0.5);
 
                         targetReal[k] = static_cast<float>(dLossDMag * outReal / outputMag);
                         targetImag[k] = static_cast<float>(dLossDMag * outImag / outputMag);
@@ -352,7 +360,7 @@ public:
             float spectralConvergence = (metrics.FrobeniusTarget > 0.0) ? static_cast<float>(std::sqrt(metrics.FrobeniusDiff) / std::sqrt(metrics.FrobeniusTarget)) : 0.0f;
             float logMagnitudeLoss = static_cast<float>(metrics.L1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
 
-            totalMrLoss += (spectralConvergence + logMagnitudeLoss);
+            totalMrLoss += ((specWeight * spectralConvergence) + (logMagWeight * logMagnitudeLoss));
         }
 
         return totalMrLoss / static_cast<float>(configurations.size());
