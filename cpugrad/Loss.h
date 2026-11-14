@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 template <typename T>
 class LossT
 {
@@ -49,7 +51,7 @@ public:
 template <typename T>
 class ESRLossT : public LossT<T>
 {
-	static constexpr T epsilon = T(1e-8);
+	static constexpr T epsilon = T(1e-4);
 
 public:
 	ESRLossT()
@@ -63,10 +65,13 @@ public:
 
 		for (size_t t = 0; t < numSamples; t++)
 		{
+			 if (std::abs(target[t]) < epsilon)
+			 {
+				totEnergy += epsilon;
+			 }
+
 			totEnergy += (target[t] * target[t]);
 		}
-
-		totEnergy += epsilon;
 
 		double scale = 2.0 * scaleFactor / totEnergy;
 

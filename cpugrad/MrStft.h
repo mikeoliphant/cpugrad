@@ -307,7 +307,8 @@ public:
 
                     double dLossDMag = 0.0;
 
-                    if (rawOutputPower > epsilon)
+                    // Match torch clamp(power, eps) backward: no gradient flows through clamped bins
+                    if (rawOutputPower >= static_cast<float>(epsilon))
                     {
                         double dScDMag = 0.0;
 
@@ -315,7 +316,7 @@ public:
 
                         double dLogDMag = 0.0;
 
-                        double magDifference = static_cast<double>(outputMag - targetMag);
+                        double magDifference = static_cast<double>(outputMag) - static_cast<double>(targetMag);
 
                         double sign = 0.0;
 
@@ -323,7 +324,7 @@ public:
                         {
                             sign = (magDifference > 0.0) ? 1.0 : -1.0;
 
-                            dLogDMag = (sign / (logDenom * outputMag));
+                            dLogDMag = (sign / (logDenom * static_cast<double>(outputMag)));
                         }
 
                         dLossDMag = ((dScDMag * specWeight) + (dLogDMag * logMagWeight)) * (static_cast<double>(fftSize) * 0.5);
@@ -337,6 +338,11 @@ public:
                         targetImag[k] = 0.0f;
                     }
                 }
+
+                // The inverse real FFT weights DC and Nyquist by 1/N but interior bins by 2/N.
+                // After the N/2 scale above, DC and Nyquist need doubling to get the full gradient.
+                targetReal[0] *= 2.0f;
+                targetReal[freqBins - 1] *= 2.0f;
 
                 // Process backward pass and accumulate straight into outGradient via our processor instance
                 stftProcessors[c]->ProcessBackwardFrame(outGradient, frame, targetFrame, targetReal, targetImag, globalScale);
