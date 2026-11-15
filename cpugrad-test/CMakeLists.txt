@@ -1,6 +1,6 @@
 add_executable(cpugrad-test Test.cpp Torch.h Tests.h)
 
-find_package(Torch)
+find_package(Torch QUIET)
 
 if(Torch_FOUND)
 	message(STATUS "Found Torch")
@@ -20,7 +20,7 @@ else()
 	message(STATUS "Torch not found")
 endif()
 
-target_link_libraries(cpugrad-test PUBLIC cpugrad NeuralAudio)
+target_link_libraries(cpugrad-test PUBLIC cpugrad)
 target_include_directories(cpugrad-test PUBLIC ../cpugrad)
 target_include_directories(cpugrad-test PUBLIC ../deps/NeuralAudio/NeuralAudio)
 target_include_directories(cpugrad-test PUBLIC ../deps/AudioFFT)
