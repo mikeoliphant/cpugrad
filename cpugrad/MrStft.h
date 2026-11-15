@@ -189,7 +189,9 @@ private:
     std::vector<float> targetFrame;
     std::vector<float> outputFrame;
     const T epsilon = static_cast<T>(1e-8);
-    double specWeight = 1.0;
+    // Spectral convergence defaults to off for training: per-segment SC blows up on near-silent segments,
+    // and in auraloss's batch-wide form it contributes little gradient. Use SetWeights(1, 1) to match auraloss's metric.
+    double specWeight = 0.0;
     double logMagWeight = 1.0;
 
 public:
@@ -267,7 +269,8 @@ public:
 
     void ComputeLoss(const T* __restrict output, const T* __restrict target, T* __restrict outGradient, size_t numSamples, double scaleFactor) override
     {
-        double globalScale = scaleFactor / (static_cast<double>(configurations.size() * numSamples));
+        // Per-resolution losses are already means (over frames x bins), so only average across resolutions
+        double globalScale = scaleFactor / static_cast<double>(configurations.size());
 
         for (size_t c = 0; c < configurations.size(); c++)
         {
@@ -277,7 +280,13 @@ public:
             size_t outputFrames = stftProcessors[c]->GetOutputFrames();
             size_t freqBins = stftProcessors[c]->GetFreqBins();
 
-            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, output, target, outputFrames, freqBins);
+            // The forward metrics pass only supplies the spectral convergence norms, so skip it when SC is off
+            StftLossMetrics metrics = { 0.0, 0.0, 0.0 };
+
+            if (specWeight != 0.0)
+            {
+                metrics = ComputeForwardMetricsForScale(c, output, target, outputFrames, freqBins);
+            }
 
             // --- PASS 2: Adjoint Backpropagation Pass ---
             double sqrtDiff = std::sqrt(metrics.FrobeniusDiff);

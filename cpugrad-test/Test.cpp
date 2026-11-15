@@ -124,11 +124,13 @@ void SpecTestTorch()
 
 	// 2. Generate target signal: A clean 440Hz tone with an exponential decay
 	auto decay = torch::exp(-3.0 * t);
-	auto target_signal = torch::sin(2 * M_PI * 440.0 * t) * decay * 0;
+	auto target_signal = (torch::sin(2 * M_PI * 440.0 * t) * decay).to(torch::kFloat);
 
 	// Generate output signal: Fundamental tone (442Hz) + a harsh 3000Hz noise component
 	auto noise = 0.25 * torch::sin(2 * M_PI * 3000.0 * t);
-	auto output_signal = (torch::sin(2 * M_PI * 442.0 * t) * decay) + noise;
+	auto output_signal = ((torch::sin(2 * M_PI * 442.0 * t) * decay) + noise).to(torch::kFloat);
+
+	// Both signals are float32 so torch and cpugrad see bit-identical inputs at the same precision
 
 	//std::vector<StftWindowConfig> configs({ { 2048, 240, 1200 }, { 1024, 120, 600 }, { 512, 50, 240 } });
 	std::vector<StftWindowConfig> configs({ { 2048, 240, 1200 } });
@@ -160,7 +162,7 @@ void SpecTestTorch()
 
 	std::vector<float> cpugradGradient(outputSignalVec.size());
 
-	cpugradLoss.ComputeLoss(outputSignalVec.data(), targetSignalVec.data(), cpugradGradient.data(), outputSignalVec.size(), static_cast<double>(num_samples));
+	cpugradLoss.ComputeLoss(outputSignalVec.data(), targetSignalVec.data(), cpugradGradient.data(), outputSignalVec.size(), 1.0);
 
 	MSELossT<float> mseLoss;
 
