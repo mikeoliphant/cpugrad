@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <random>
 #include <vector>
 #include <format>
 #include "ChannelBuffer.h"
@@ -233,33 +234,6 @@ namespace cpugrad
 				{
 					dWPtr[k] += dWLocal[k];
 				}
-			}
-	};
-	
-	template <typename T, int Channels>
-	class LeakyReLUT : public BackpropModelT<T, Channels, Channels>
-	{
-		public:
-			void Forward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, Channels>& output) override
-			{
-				assert(input.GetNumCols() == output.GetNumCols());
-
-				auto outputMap = output.GetEigenMap();
-				auto inputMap = input.GetEigenMapConst();
-
-				outputMap = (inputMap.array() < T(0.0)).select(inputMap.array() * T(0.01), inputMap.array());
-			}
-
-			void Backward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, Channels>& dOutput, const ChannelRowSpan<T, Channels>& dInput) override
-			{
-				assert(input.GetNumCols() == dOutput.GetNumCols());
-				assert(input.GetNumCols() == dInput.GetNumCols());
-
-				auto inputMap = input.GetEigenMapConst();
-				auto dOutputMap = dOutput.GetEigenMapConst();
-				auto dInputMap = dInput.GetEigenMap();
-
-				dInputMap = (inputMap.array() < T(0.0)).select(dOutputMap.array() * T(0.01), dOutputMap.array());
 			}
 	};
 

@@ -2,6 +2,7 @@
 
 #include "Dense.h"
 #include "Conv1D.h"
+#include "Activation.h"
 
 using namespace NeuralAudio;
 using namespace cpugrad;

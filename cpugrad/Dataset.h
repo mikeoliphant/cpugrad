@@ -30,6 +30,20 @@ namespace cpugrad
 				return rand;
 			}
 
+			// Adds Gaussian noise with the given RMS level (linear) to the data in place
+			void AddNoise(float* data, size_t numSamples, float noiseRms)
+			{
+				std::normal_distribution<float> noiseDist(0.0f, noiseRms);
+
+				for (size_t i = 0; i < numSamples; i++)
+					data[i] += noiseDist(randGen);
+			}
+
+			void AddNoise(std::vector<float>& data, float noiseRms)
+			{
+				AddNoise(data.data(), data.size(), noiseRms);
+			}
+
 			std::vector<float> GenerateSin(size_t numSamples, size_t sweepSamples)
 			{
 				std::vector<float> data(numSamples);

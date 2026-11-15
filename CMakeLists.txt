@@ -12,6 +12,7 @@ add_subdirectory(deps/NeuralAudio NeuralAudio)
 set(SOURCES
 	cpugrad/ModelTrainer.h
 	cpugrad/BackpropModel.h
+	cpugrad/Activation.h
 	cpugrad/Dense.h
 	cpugrad/Conv1D.h
 	cpugrad/Loss.h
