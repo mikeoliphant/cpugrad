@@ -8,12 +8,19 @@
 namespace cpugrad
 {
 	// Activations take the pre-activation values as "input" in Backward, and support dOutput and dInput
-	// being the same buffer (in-place backward).
+	// being the same buffer (in-place backward). Forward also supports input and output being the same buffer.
+	//
+	// An activation with CanBackwardFromOutput = true also has BackwardFromOutput(), which computes the same
+	// gradient from the activation's *output*. Layers use it to avoid storing the pre-activation values.
 
 	template <typename T, int Channels>
 	class LeakyReLUT : public BackpropModelT<T, Channels, Channels>
 	{
 		public:
+			// The slope is positive, so output < 0 exactly when input < 0 (barring a tiny negative input whose
+			// 0.01x result flushes to -0 under FTZ, where the slope choice makes no practical difference)
+			static constexpr bool CanBackwardFromOutput = true;
+
 			void Forward(const ChannelRowSpan<T, Channels>& input, const ChannelRowSpan<T, Channels>& output) override
 			{
 				assert(input.GetNumCols() == output.GetNumCols());
@@ -35,6 +42,11 @@ namespace cpugrad
 
 				dInputMap = (inputMap.array() < T(0.0)).select(dOutputMap.array() * T(0.01), dOutputMap.array());
 			}
+
+			void BackwardFromOutput(const ChannelRowSpan<T, Channels>& output, const ChannelRowSpan<T, Channels>& dOutput, const ChannelRowSpan<T, Channels>& dInput)
+			{
+				Backward(output, dOutput, dInput);	// same mask, since sign(output) == sign(input)
+			}
 	};
 
 	// Rational tanh approximation, identical to NAM Core's fast_tanh ("Fasttanh" in .nam configs), so a model
@@ -44,6 +56,9 @@ namespace cpugrad
 	class FastTanhT : public BackpropModelT<T, Channels, Channels>
 	{
 		public:
+			// The derivative needs the input, so layers must keep it
+			static constexpr bool CanBackwardFromOutput = false;
+
 			// f(x) = N(x) / D(x)
 			//   N = x * (A + A|x| + (B + C|x|) x^2)
 			//   D = E + (E + x^2) * |x + F x |x||
