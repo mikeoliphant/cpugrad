@@ -307,7 +307,8 @@ namespace cpugrad
 
 					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
-					double err = lossFunction->GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
+					// The training loss on the validation data, for display (MR-STFT over 9 s takes a while, so split it across workers)
+					double trainingLoss = MeanLossOnWorkers(runOnWorkers, verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 
 					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
@@ -324,11 +325,13 @@ namespace cpugrad
 						std::cout << "Thread - Forward: " << threadForwardTime << " Back: " << threadBackTime << " Other: " << (threadTotalTime - threadForwardTime - threadBackTime) << std::endl;
 					}
 
-					std::cout << "Epoch " << std::format("{:3d}", (epoch + 1)) << ": " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction->GetName() << ": " << std::format("{:.8f}", err);
+					std::cout << "Epoch " << std::format("{:3d}", (epoch + 1)) << ": " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction->GetName() << ": " << std::format("{:.8f}", trainingLoss);
+
+					// The best epoch is picked by the evaluation loss, computed on one thread so the choice doesn't depend on the thread count
+					double err = lossEvalFunction.GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 
 					if (lossEvalFunction.GetName() != lossFunction->GetName())
 					{
-						err = lossEvalFunction.GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.8f}", err);
 					}
 
@@ -385,6 +388,32 @@ namespace cpugrad
 		private:
 			using Worker = TrainerWorkerT<T, ModelType>;
 
+			// Mean training loss, split across the workers (each with its own loss instance) if the loss supports it
+			template <typename RunOnWorkers>
+			double MeanLossOnWorkers(RunOnWorkers& runOnWorkers, const T* output, const T* target, size_t numSamples)
+			{
+				const size_t numStats = lossFunction->GetNumMeanStatistics();
+
+				if (numStats == 0)
+					return lossFunction->GetMeanLoss(output, target, numSamples);
+
+				const size_t numWorkers = modelTrainerWorkers.size();
+
+				std::vector<std::vector<double>> workerStats(numWorkers, std::vector<double>(numStats, 0.0));
+
+				runOnWorkers([&](Worker& worker, size_t w) { worker.GetLoss().AccumulateMeanStatistics(output, target, numSamples, w, numWorkers, workerStats[w].data()); });
+
+				std::vector<double> stats(numStats, 0.0);
+
+				for (auto& partStats : workerStats)
+				{
+					for (size_t s = 0; s < numStats; s++)
+						stats[s] += partStats[s];
+				}
+
+				return lossFunction->MeanLossFromStatistics(stats.data(), numSamples);
+			}
+
 			size_t trainingSize = 8192;
 			size_t miniBatchSize = 16;
 			float initialLearningRate = 0.004f;
@@ -420,6 +449,11 @@ namespace cpugrad
 			void SetLoss(std::unique_ptr<LossT<T>> loss)
 			{
 				lossFunction = std::move(loss);
+			}
+
+			LossT<T>& GetLoss()
+			{
+				return *lossFunction;
 			}
 
 			ModelType* GetModel()

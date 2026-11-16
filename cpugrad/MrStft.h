@@ -238,11 +238,12 @@ public:
         this->logMagWeight = logMagWeight;
     }
 
-    StftLossMetrics ComputeForwardMetricsForScale(size_t c, const T* output, const T* target, size_t outputFrames, size_t freqBins)
+    // Spectral metrics summed over frames [firstFrame, endFrame) of resolution c
+    StftLossMetrics ComputeForwardMetricsForScale(size_t c, const T* output, const T* target, size_t firstFrame, size_t endFrame, size_t freqBins)
     {
         StftLossMetrics metrics = { 0.0, 0.0, 0.0 };
 
-        for (size_t frame = 0; frame < outputFrames; frame++)
+        for (size_t frame = firstFrame; frame < endFrame; frame++)
         {
             stftProcessors[c]->ProcessForwardFrame(target, frame, timeBuffer.data(), targetSpectrum.data());
             stftProcessors[c]->ProcessForwardFrame(output, frame, timeBuffer.data(), outputSpectrum.data());
@@ -287,7 +288,7 @@ public:
 
             if (specWeight != 0.0)
             {
-                metrics = ComputeForwardMetricsForScale(c, output, target, outputFrames, freqBins);
+                metrics = ComputeForwardMetricsForScale(c, output, target, 0, outputFrames, freqBins);
             }
 
             // --- PASS 2: Adjoint Backpropagation Pass ---
@@ -362,7 +363,31 @@ public:
         }
     }
 
-    double GetMeanLoss(const T* __restrict output, const T* __restrict target, size_t numSamples) override
+    // GetMeanLoss() comes from LossT, via these.
+    // Statistics: for each resolution, the FrobeniusDiff, FrobeniusTarget and L1LogDiff sums over frames.
+    // Parts split each resolution's frames, so the result doesn't depend on how the data is split (up to summation order).
+    size_t GetNumMeanStatistics() override
+    {
+        return 3 * configurations.size();
+    }
+
+    void AccumulateMeanStatistics(const T* output, const T* target, size_t numSamples, size_t part, size_t numParts, double* stats) override
+    {
+        for (size_t c = 0; c < configurations.size(); c++)
+        {
+            stftProcessors[c]->SetNumSamples(numSamples);
+
+            auto [firstFrame, endFrame] = this->PartRange(stftProcessors[c]->GetOutputFrames(), part, numParts);
+
+            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, output, target, firstFrame, endFrame, stftProcessors[c]->GetFreqBins());
+
+            stats[3 * c] += metrics.FrobeniusDiff;
+            stats[3 * c + 1] += metrics.FrobeniusTarget;
+            stats[3 * c + 2] += metrics.L1LogDiff;
+        }
+    }
+
+    double MeanLossFromStatistics(const double* stats, size_t numSamples) override
     {
         float totalMrLoss = 0.0f;
 
@@ -373,10 +398,12 @@ public:
             size_t outputFrames = stftProcessors[c]->GetOutputFrames();
             size_t freqBins = stftProcessors[c]->GetFreqBins();
 
-            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, output, target, outputFrames, freqBins);
+            const double frobeniusDiff = stats[3 * c];
+            const double frobeniusTarget = stats[3 * c + 1];
+            const double l1LogDiff = stats[3 * c + 2];
 
-            float spectralConvergence = (metrics.FrobeniusTarget > 0.0) ? static_cast<float>(std::sqrt(metrics.FrobeniusDiff) / std::sqrt(metrics.FrobeniusTarget)) : 0.0f;
-            float logMagnitudeLoss = static_cast<float>(metrics.L1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
+            float spectralConvergence = (frobeniusTarget > 0.0) ? static_cast<float>(std::sqrt(frobeniusDiff) / std::sqrt(frobeniusTarget)) : 0.0f;
+            float logMagnitudeLoss = static_cast<float>(l1LogDiff / (static_cast<double>(outputFrames) * static_cast<double>(freqBins)));
 
             totalMrLoss += ((specWeight * spectralConvergence) + (logMagWeight * logMagnitudeLoss));
         }
