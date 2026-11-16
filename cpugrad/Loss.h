@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cmath>
+#include <memory>
+#include <string>
+#include <vector>
 
 template <typename T>
 class LossT
@@ -104,27 +107,47 @@ public:
 	}
 };
 
-template <typename T, typename LossType1, double Loss1Weight, typename LossType2, double Loss2Weight>
+// Weighted sum of any number of losses, built at runtime
+template <typename T>
 class JointLossT : public LossT<T>
 {
 	public:
-		JointLossT()
+		void AddLoss(std::unique_ptr<LossT<T>> loss, double weight)
 		{
-			this->name = loss1.GetName() + "/"  + loss2.GetName();
+			if (!this->name.empty())
+				this->name += "/";
+
+			this->name += loss->GetName();
+
+			terms.push_back({ std::move(loss), weight });
 		}
 
 		void ComputeLoss(const T* output, const T* target, T* outGradient, size_t numSamples, double scaleFactor) override
 		{
-			loss1.ComputeLoss(output, target, outGradient, numSamples, scaleFactor * Loss1Weight);
-			loss2.ComputeLoss(output, target, outGradient, numSamples, scaleFactor * Loss2Weight);
+			for (auto& term : terms)
+			{
+				term.loss->ComputeLoss(output, target, outGradient, numSamples, scaleFactor * term.weight);
+			}
 		}
 
 		double GetMeanLoss(const T* output, const T* target, size_t numSamples) override
 		{
-			return (loss1.GetMeanLoss(output, target, numSamples) * Loss1Weight) + (loss2.GetMeanLoss(output, target, numSamples) * Loss2Weight);
+			double total = 0;
+
+			for (auto& term : terms)
+			{
+				total += term.loss->GetMeanLoss(output, target, numSamples) * term.weight;
+			}
+
+			return total;
 		}
 
 	private:
-		LossType1 loss1;
-		LossType2 loss2;	
+		struct Term
+		{
+			std::unique_ptr<LossT<T>> loss;
+			double weight;
+		};
+
+		std::vector<Term> terms;
 };

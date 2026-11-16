@@ -13,6 +13,7 @@
 #include "Optimizer.h"
 #include "Loss.h"
 #include "MrStft.h"
+#include "LossSpec.h"
 
 namespace cpugrad
 {
@@ -57,11 +58,11 @@ namespace cpugrad
 			std::mt19937 gen;
 	};
 
-	template <typename T, typename ModelType, typename LossType>
+	template <typename T, typename ModelType>
 	class TrainerWorkerT;
 
-	//template <typename T, typename ModelType, typename LossType = JointLossT<T, MSELossT<T>, 1.0, MultiResolutionStftLossT<T>, .0005>, typename LossEvalType = ESRLossT<T>>
-	template <typename T, typename ModelType, typename LossType = MSELossT<T>, typename LossEvalType = ESRLossT<T>>
+	// The training loss is set at runtime with SetLoss() (MSE by default). LossEvalType is the metric used to pick the best checkpoint.
+	template <typename T, typename ModelType, typename LossEvalType = ESRLossT<T>>
 	class ModelTrainerT
 	{
 		public:
@@ -72,7 +73,6 @@ namespace cpugrad
 
 			ModelTrainerT(size_t numThreads, const std::mt19937& rand) :
 				rand(rand),
-				lossFunction(),
 				lossEvalFunction()
 			{
 				DenormalManager::DisableDenormals();
@@ -86,16 +86,35 @@ namespace cpugrad
 
 				for (size_t w = 0; w < numThreads; w++)
 				{
-					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType, LossType>>(coreIds[w], trainingSize));
+					modelTrainerWorkers.emplace_back(std::make_unique<TrainerWorkerT<T, ModelType>>(coreIds[w], trainingSize));
 				}
-				
+
 				mainWorker = modelTrainerWorkers[0].get();
 
 				this->modelBackprop = mainWorker->GetModel();
 
 				bestWeights.resize(modelBackprop->GetNumWeights());
+
+				SetLoss(LossSpec{ LossTerm{ "mse", 1.0, {} } });
 			}
-			
+
+			// Each worker gets its own loss instance, since losses keep per-call scratch state
+			void SetLoss(const LossSpec& spec)
+			{
+				lossSpec = spec;
+				lossFunction = CreateLoss<T>(spec);
+
+				for (auto& worker : modelTrainerWorkers)
+				{
+					worker->SetLoss(CreateLoss<T>(spec));
+				}
+			}
+
+			const LossSpec& GetLossSpec() const
+			{
+				return lossSpec;
+			}
+
 			size_t GetReceptiveField()
 			{
 				return modelBackprop->GetReceptiveField();
@@ -263,7 +282,7 @@ namespace cpugrad
 					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
 					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
-					double err = lossFunction.GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
+					double err = lossFunction->GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 
 					double epochTime = std::chrono::duration<double>(Clock::now() - epochStart).count();
 
@@ -280,9 +299,9 @@ namespace cpugrad
 						std::cout << "Thread - Forward: " << threadForwardTime << " Back: " << threadBackTime << " Other: " << (threadTotalTime - threadForwardTime - threadBackTime) << std::endl;
 					}
 
-					std::cout << "Epoch " << std::format("{:3d}", (epoch + 1)) << ": " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction.GetName() << ": " << std::format("{:.8f}", err);
-					
-					if (lossEvalFunction.GetName() != lossFunction.GetName())
+					std::cout << "Epoch " << std::format("{:3d}", (epoch + 1)) << ": " << std::format("{:.2f}", epochTime) << "s LR: " << std::format("{:.5f}", learningRate) << " " << lossFunction->GetName() << ": " << std::format("{:.8f}", err);
+
+					if (lossEvalFunction.GetName() != lossFunction->GetName())
 					{
 						err = lossEvalFunction.GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
 						std::cout << " " << lossEvalFunction.GetName() << ": " << std::format("{:.8f}", err);
@@ -337,10 +356,11 @@ namespace cpugrad
 		private:
 			size_t trainingSize = 8192;
 			std::mt19937 rand;
-			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType, LossType>>> modelTrainerWorkers;
-			TrainerWorkerT<T, ModelType, LossType>* mainWorker;
+			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
+			TrainerWorkerT<T, ModelType>* mainWorker;
 			ModelType* modelBackprop;
-			LossType lossFunction;
+			LossSpec lossSpec;
+			std::unique_ptr<LossT<T>> lossFunction;	// for reporting the training loss on the validation data
 			LossEvalType lossEvalFunction;
 			size_t maxEpochs = 1000;
 			std::vector<float> bestWeights;
@@ -348,18 +368,22 @@ namespace cpugrad
 			std::function<bool(size_t epoch, double loss)> epochCallback;
 	};
 
-	template <typename T, typename ModelType, typename LossType>
+	template <typename T, typename ModelType>
 	class TrainerWorkerT : public TrainingContextT<T>
 	{
 		public:
 			TrainerWorkerT(uint32_t coreID, size_t trainingSize) :
 				coreID(coreID),
 				modelBackprop(std::make_unique<ModelType>()),
-				lossFunction(),
 				optimizer(),
 				bufferArena(modelBackprop->GetMaxScratchBufferSize(trainingSize))
 			{
 				this->modelBackprop->SetTrainingContext(static_cast<TrainingContextT<T>*>(this));
+			}
+
+			void SetLoss(std::unique_ptr<LossT<T>> loss)
+			{
+				lossFunction = std::move(loss);
 			}
 
 			ModelType* GetModel()
@@ -473,9 +497,9 @@ namespace cpugrad
 						//ApplyHPF(batchTargetPtr, outputSize);
 						//ApplyHPF(forwardOutput.GetData(), outputSize);
 
-						lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
+						lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
 
-						//std::cout << "Batch loss: " << lossFunction.GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
+						//std::cout << "Batch loss: " << lossFunction->GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
 
 						bufferArena.FreeScratchBuffer(batchTarget);
 
@@ -565,7 +589,7 @@ namespace cpugrad
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput);
 
-				double upErr = lossFunction.GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize);
+				double upErr = lossFunction->GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize);
 
 				*weightPtr = originalWeight - (T)delta;
 
@@ -573,7 +597,7 @@ namespace cpugrad
 
 				modelBackprop->Forward(batchInput.Slice(numSamples), forwardOutput.Slice(outputSize));
 
-				double downErr = lossFunction.GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize);
+				double downErr = lossFunction->GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputSize);
 
 				*weightPtr = originalWeight;
 
@@ -586,7 +610,7 @@ namespace cpugrad
 				auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
 				outputGradient.SetZero();
 
-				lossFunction.ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 1.0f);
+				lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.Slice(receptiveField, outputSize).GetDataConst(), outputGradient.GetData(), outputSize, 1.0f);
 
 				modelBackprop->Backward(batchInput.Slice(numSamples), outputGradient.Slice(outputSize), forwardOutput.Slice(numSamples));
 
@@ -606,7 +630,7 @@ namespace cpugrad
 			uint32_t coreID;
 			std::vector<TrainingDataBatch> batches;
 			std::unique_ptr<ModelType> modelBackprop;
-			LossType lossFunction;
+			std::unique_ptr<LossT<T>> lossFunction;
 			AdamOptimizerT<T> optimizer;
 			BatchBufferArenaT<T> bufferArena;
 			ChannelBufferDynamic<float, 1> batchInput;
