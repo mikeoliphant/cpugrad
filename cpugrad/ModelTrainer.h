@@ -3,6 +3,7 @@
 #include <cmath>
 #include <chrono>
 #include <filesystem>
+#include <functional>
 #include <thread>
 #include <barrier>
 #include <atomic>
@@ -188,27 +189,46 @@ namespace cpugrad
 
 				double lossScale = 1.0f;
 
-				std::vector<std::jthread> threads;
-
+				// Each worker has a thread that runs one task per round. runOnWorkers() sets the task and runs a round
+				// on all workers, returning when they have all finished.
 				const size_t numWorkers = modelTrainerWorkers.size();
 
-				std::barrier startTrainingBarrier(numWorkers + 1);
-				std::barrier finishTrainingBarrier(numWorkers + 1);
+				std::function<void(Worker& worker, size_t workerIndex)> workerTask;
+
+				std::barrier startBarrier(numWorkers + 1);
+				std::barrier finishBarrier(numWorkers + 1);
+
+				auto runOnWorkers = [&](std::function<void(Worker&, size_t)> task)
+				{
+					workerTask = std::move(task);
+
+					startBarrier.arrive_and_wait();
+					finishBarrier.arrive_and_wait();
+				};
+
+				std::vector<std::jthread> threads;
 
 				threads.reserve(numWorkers);
 
-				for (auto& worker : modelTrainerWorkers)
+				for (size_t w = 0; w < numWorkers; w++)
 				{
-					threads.emplace_back([&, wPtr = worker.get()](std::stop_token stop)
+					threads.emplace_back([&, w](std::stop_token stop)
 					{
-						wPtr->TrainBatches(
-							stop,
-							startTrainingBarrier,
-							finishTrainingBarrier,
-							input,
-							target,
-							lossScale
-						);
+						Worker& worker = *modelTrainerWorkers[w];
+
+						worker.PinThread();
+
+						while (true)
+						{
+							startBarrier.arrive_and_wait();
+
+							if (stop.stop_requested())
+								break;
+
+							workerTask(worker, w);
+
+							finishBarrier.arrive_and_wait();
+						}
 					});
 				}
 
@@ -256,21 +276,7 @@ namespace cpugrad
 
 						auto trainStart = Clock::now();
 
-						startTrainingBarrier.arrive_and_wait();
-						finishTrainingBarrier.arrive_and_wait();
-
-						//for (auto& worker : modelTrainerWorkers)
-						//{
-						//	threads.emplace_back(
-						//		&TrainerWorkerT<T, ModelType>::TrainBatches,
-						//		worker.get(),
-						//		std::ref(input),
-						//		std::ref(target),
-						//		lossScale
-						//	);							
-						//}
-
-						//threads.clear();
+						runOnWorkers([&](Worker& worker, size_t) { worker.TrainBatches(input, target, lossScale); });
 
 						trainDuration += (Clock::now() - trainStart);
 
@@ -289,7 +295,16 @@ namespace cpugrad
 					}
 
 					auto verifyStart = Clock::now();
-					VerifyModel(verifyInput, verifyOutput.data(), verifySamples);
+
+					// Validate on all workers, each taking every numWorkers'th chunk. The other workers last got the main
+					// weights before the epoch's final update, so refresh them first.
+					for (size_t w = 1; w < numWorkers; w++)
+					{
+						modelTrainerWorkers[w]->CopyWeightsFrom(mainWorker->GetOptimizer());
+					}
+
+					runOnWorkers([&](Worker& worker, size_t w) { worker.VerifyModel(verifyInput, verifyOutput.data(), verifySamples, w, numWorkers); });
+
 					double verifyTime = std::chrono::duration<double>(Clock::now() - verifyStart).count();
 
 					double err = lossFunction->GetMeanLoss(verifyOutput.data() + receptiveField, verifyTarget + receptiveField, verifySamples - receptiveField);
@@ -343,12 +358,13 @@ namespace cpugrad
 					learningRate *= learningRateDecay;
 				}
 
+				// Release the threads from their start barrier with the stop flag set, so they exit
 				for (auto& t : threads)
 				{
 					t.request_stop();
 				}
 
-				startTrainingBarrier.arrive_and_wait();
+				startBarrier.arrive_and_wait();
 			}
 
 			void TrainIdentity(std::vector<float>& data)
@@ -367,6 +383,8 @@ namespace cpugrad
 			}
 
 		private:
+			using Worker = TrainerWorkerT<T, ModelType>;
+
 			size_t trainingSize = 8192;
 			size_t miniBatchSize = 16;
 			float initialLearningRate = 0.004f;
@@ -374,8 +392,8 @@ namespace cpugrad
 			size_t epochsCompleted = 0;
 			size_t bestEpoch = 0;
 			std::mt19937 rand;
-			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
-			TrainerWorkerT<T, ModelType>* mainWorker;
+			std::vector<std::unique_ptr<Worker>> modelTrainerWorkers;
+			Worker* mainWorker;
 			ModelType* modelBackprop;
 			LossSpec lossSpec;
 			std::unique_ptr<LossT<T>> lossFunction;	// for reporting the training loss on the validation data
@@ -471,79 +489,76 @@ namespace cpugrad
 				data[0] = data[0] * (1.0f - coefficient);
 			}
 
-			void TrainBatches(std::stop_token stop,	std::barrier<>& startBarrier, std::barrier<>& finishBarrier, const T* input, const T* target, double& lossScale)
+			void PinThread()
 			{
 				ThreadAffinityManager::PinCurrentThread(coreID);
 				//ThreadAffinityManager::SetHighPerformancePriority();
-
-				while (!stop.stop_requested())
-				{
-					startBarrier.arrive_and_wait();
-
-					if (stop.stop_requested()) break;
-
-					auto totalStart = Clock::now();
-
-					for (auto& b : batches)
-					{
-						size_t numSamples = b.Size;
-
-						size_t receptiveField = modelBackprop->GetReceptiveField();
-						size_t outputSize = numSamples - receptiveField;
-
-						bufferArena.template GetBuffer<1>(batchInput, numSamples);
-
-						float* batchInPtr = batchInput.GetData();
-						std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
-
-						bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
-
-						forwardOutput.SetZero();
-
-						auto forwardStart = Clock::now();
-						modelBackprop->Forward(batchInput, forwardOutput);
-						forwardDuration += (Clock::now() - forwardStart);
-
-						auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
-						outputGradient.SetZero();
-
-						auto batchTarget = bufferArena.template GetScratchBuffer<1>(outputSize);
-
-						auto batchTargetPtr = batchTarget.GetData();
-						std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
-
-						//ApplyHPF(batchTargetPtr, outputSize);
-						//ApplyHPF(forwardOutput.GetData(), outputSize);
-
-						lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
-
-						//std::cout << "Batch loss: " << lossFunction->GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
-
-						bufferArena.FreeScratchBuffer(batchTarget);
-
-						// Really shouldn't need this
-						auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
-
-						auto backStart = Clock::now();
-						modelBackprop->Backward(batchInput, outputGradient, layerOutputGradient);
-						backDuration += (Clock::now() - backStart);
-
-						bufferArena.FreeScratchBuffer(layerOutputGradient);
-						bufferArena.FreeScratchBuffer(outputGradient);
-					}
-
-					totalDuration += (Clock::now() - totalStart);
-
-					finishBarrier.arrive_and_wait();
-				}
 			}
 
-			void VerifyModel(const T* input, T* output, const size_t totalSamples)
+			// Forward, loss and backward for the batches added since the last Reset(), accumulating weight gradients
+			void TrainBatches(const T* input, const T* target, double lossScale)
 			{
-				size_t outputSize = 8192;
+				auto totalStart = Clock::now();
+
+				for (auto& b : batches)
+				{
+					size_t numSamples = b.Size;
+
+					size_t receptiveField = modelBackprop->GetReceptiveField();
+					size_t outputSize = numSamples - receptiveField;
+
+					bufferArena.template GetBuffer<1>(batchInput, numSamples);
+
+					float* batchInPtr = batchInput.GetData();
+					std::copy(input + b.Offset, input + b.Offset + numSamples, batchInPtr);
+
+					bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
+
+					forwardOutput.SetZero();
+
+					auto forwardStart = Clock::now();
+					modelBackprop->Forward(batchInput, forwardOutput);
+					forwardDuration += (Clock::now() - forwardStart);
+
+					auto outputGradient = bufferArena.template GetScratchBuffer<1>(outputSize);
+					outputGradient.SetZero();
+
+					auto batchTarget = bufferArena.template GetScratchBuffer<1>(outputSize);
+
+					auto batchTargetPtr = batchTarget.GetData();
+					std::copy(target + b.Offset + receptiveField, target + b.Offset + numSamples, batchTargetPtr);
+
+					//ApplyHPF(batchTargetPtr, outputSize);
+					//ApplyHPF(forwardOutput.GetData(), outputSize);
+
+					lossFunction->ComputeLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputGradient.GetData(), outputSize, lossScale);
+
+					//std::cout << "Batch loss: " << lossFunction->GetMeanLoss(forwardOutput.GetDataConst(), batchTarget.GetDataConst(), outputSize) / (float)outputSize << std::endl;
+
+					bufferArena.FreeScratchBuffer(batchTarget);
+
+					// Really shouldn't need this
+					auto layerOutputGradient = bufferArena.template GetScratchBuffer<1>(numSamples);
+
+					auto backStart = Clock::now();
+					modelBackprop->Backward(batchInput, outputGradient, layerOutputGradient);
+					backDuration += (Clock::now() - backStart);
+
+					bufferArena.FreeScratchBuffer(layerOutputGradient);
+					bufferArena.FreeScratchBuffer(outputGradient);
+				}
+
+				totalDuration += (Clock::now() - totalStart);
+			}
+
+			// Model output, computed in chunks of VerifyChunkSize output samples. firstChunk and chunkStride let several
+			// workers split the work: each computes every chunkStride'th chunk, starting at firstChunk.
+			void VerifyModel(const T* input, T* output, const size_t totalSamples, size_t firstChunk = 0, size_t chunkStride = 1)
+			{
+				size_t outputSize = VerifyChunkSize;
 				size_t receptiveField = modelBackprop->GetReceptiveField();
 				size_t batchSize = outputSize + receptiveField;
-				size_t currentOffset = receptiveField;	// ** NOTE - we will have invalid data for the initial receptive field
+				size_t currentOffset = receptiveField + (firstChunk * outputSize);	// ** NOTE - we will have invalid data for the initial receptive field
 
 				bufferArena.template GetBuffer<1>(forwardOutput, outputSize);
 				bufferArena.template GetBuffer<1>(batchInput, batchSize);
@@ -566,7 +581,7 @@ namespace cpugrad
 					T* forwardOutputPtr = forwardOutput.GetData();
 					std::copy(forwardOutputPtr, forwardOutputPtr + toCopy, output + currentOffset);
 
-					currentOffset += outputSize;
+					currentOffset += outputSize * chunkStride;
 				}
 			}
 
@@ -645,6 +660,8 @@ namespace cpugrad
 
 
 		private:
+			static constexpr size_t VerifyChunkSize = 8192;
+
 			uint32_t coreID;
 			std::vector<TrainingDataBatch> batches;
 			std::unique_ptr<ModelType> modelBackprop;
