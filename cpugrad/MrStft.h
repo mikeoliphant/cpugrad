@@ -3,13 +3,14 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <complex>
 #include <algorithm>
 #include <memory>
 #include <cstring>
 #include <numbers>
 
 #include "Loss.h"
-#include "AudioFFT.h"
+#include "Fft.h"
 
 struct StftWindowConfig
 {
@@ -18,6 +19,8 @@ struct StftWindowConfig
     size_t WindowSize;
 };
 
+// STFT framing (reflect padding, Hann window, overlap-add) for one resolution. The time and spectrum buffers are passed
+// in by the caller: GetFftSize() floats and GetFreqBins() bins, aligned to cpugrad::Fft::RequiredAlignment.
 template <typename T>
 class StftFrameProcessor
 {
@@ -27,11 +30,9 @@ public:
         freqBins(fftSize / 2 + 1), padSize(fftSize / 2),
         frameOffset((fftSize - windowSize) / 2),
         numSamples(0), paddedLength(0), outputFrames(0),
-        fftEngine()
+        fft(fftSize)
     {
         frameOverlapNormalization = CalculateFrameOverlapNormalization();
-
-        fftEngine.init(fftSize);
 
         hannWindow.resize(windowSize);
 
@@ -56,41 +57,44 @@ public:
     }
 
     // Informational structural query methods
+    size_t GetFftSize() const noexcept { return fftSize; }
     size_t GetOutputFrames() const noexcept { return outputFrames; }
     size_t GetFreqBins() const noexcept { return freqBins; }
 
-    // Extracts, windows, and transforms a single frame slice forward into the frequency domain
-    void ProcessForwardFrame(const T* __restrict audioTimeline, size_t frameIdx,
-        std::vector<float>& timeScratchpad, std::vector<float>& realDest, std::vector<float>& imagDest) const
+    // Extracts and windows one frame into timeBuffer, then transforms it into spectrum
+    void ProcessForwardFrame(const T* __restrict audioTimeline, size_t frameIdx, float* timeBuffer, std::complex<float>* spectrum)
     {
         size_t sampleStart = frameIdx * hopSize;
-        std::fill(timeScratchpad.begin(), timeScratchpad.begin() + fftSize, 0.0f);
+
+        std::fill(timeBuffer, timeBuffer + fftSize, 0.0f);
 
         for (size_t i = 0; i < windowSize; ++i)
         {
             size_t paddedIdx = sampleStart + frameOffset + i;
             float sample = GetReflectSample(audioTimeline, paddedIdx);
 
-            timeScratchpad[frameOffset + i] = sample * hannWindow[i];
+            timeBuffer[frameOffset + i] = sample * hannWindow[i];
         }
 
-        fftEngine.fft(timeScratchpad.data(), realDest.data(), imagDest.data());
+        fft.Forward(timeBuffer, spectrum);
     }
 
-    // Transforms a single complex gradient frame backward and overlap-adds it into the master gradient track
-    void ProcessBackwardFrame(T* __restrict outGradient, size_t frameIdx,
-        std::vector<float>& timeScratchpad, std::vector<float>& realSrc, std::vector<float>& imagSrc,
-        double externalScale) const
+    // Transforms one frame's gradient spectrum back (via timeBuffer) and overlap-adds it into outGradient.
+    // gradSpectrum is used as scratch space.
+    void ProcessBackwardFrame(T* __restrict outGradient, size_t frameIdx, std::complex<float>* gradSpectrum, float* timeBuffer, double externalScale)
     {
+        fft.Inverse(gradSpectrum, timeBuffer);
+
+        const double scale = externalScale * fft.InverseScale();
+
         size_t sampleStart = frameIdx * hopSize;
-        fftEngine.ifft(timeScratchpad.data(), realSrc.data(), imagSrc.data());
 
         for (size_t i = 0; i < windowSize; ++i)
         {
             size_t paddedIdx = sampleStart + frameOffset + i;
-            float windowedGradSample = timeScratchpad[frameOffset + i] * hannWindow[i];
+            float windowedGradSample = timeBuffer[frameOffset + i] * hannWindow[i];
 
-            AccumulateReflectGradient(outGradient, paddedIdx, static_cast<float>(windowedGradSample * externalScale));
+            AccumulateReflectGradient(outGradient, paddedIdx, static_cast<float>(windowedGradSample * scale));
         }
     }
 
@@ -164,7 +168,7 @@ private:
     size_t paddedLength;
     size_t outputFrames;
 
-    mutable audiofft::AudioFFT fftEngine;
+    cpugrad::Fft fft;
     std::vector<float> hannWindow;
 };
 
@@ -181,13 +185,12 @@ class MultiResolutionStftLossT : public LossT<T>
 private:
     std::vector<std::unique_ptr<StftFrameProcessor<T>>> stftProcessors;
     std::vector<StftWindowConfig> configurations;
-    std::vector<std::vector<T>> hannWindows;
-    std::vector<float> targetReal;
-    std::vector<float> targetImag;
-    std::vector<float> outputReal;
-    std::vector<float> outputImag;
-    std::vector<float> targetFrame;
-    std::vector<float> outputFrame;
+
+    // Working buffers, sized for the largest FFT. The target spectrum is reused for the gradient spectrum.
+    cpugrad::FftVector<float> timeBuffer;
+    cpugrad::FftVector<std::complex<float>> targetSpectrum;
+    cpugrad::FftVector<std::complex<float>> outputSpectrum;
+
     const T epsilon = static_cast<T>(1e-8);
     // Spectral convergence defaults to off for training: per-segment SC blows up on near-silent segments,
     // and in auraloss's batch-wide form it contributes little gradient. Use SetWeights(1, 1) to match auraloss's metric.
@@ -200,10 +203,7 @@ public:
     {
         this->name = "MR-STFT";
 
-        size_t maxFft = (configurations[0].FftSize);
-
-        targetFrame.resize(maxFft);
-        outputFrame.resize(maxFft);
+        size_t maxFft = 0;
 
         for (StftWindowConfig& config : configurations)
         {
@@ -214,14 +214,13 @@ public:
                     config.WindowSize
                 )
             );
+
+            maxFft = std::max(maxFft, config.FftSize);
         }
 
-        size_t maxBins = (maxFft / 2) + 1;
-
-        targetReal.resize(maxBins);
-        targetImag.resize(maxBins);
-        outputReal.resize(maxBins);
-        outputImag.resize(maxBins);
+        timeBuffer.resize(maxFft);
+        targetSpectrum.resize((maxFft / 2) + 1);
+        outputSpectrum.resize((maxFft / 2) + 1);
     }
 
     ~MultiResolutionStftLossT() override = default;
@@ -245,13 +244,16 @@ public:
 
         for (size_t frame = 0; frame < outputFrames; frame++)
         {
-            stftProcessors[c]->ProcessForwardFrame(target, frame, targetFrame, targetReal, targetImag);
-            stftProcessors[c]->ProcessForwardFrame(output, frame, outputFrame, outputReal, outputImag);
+            stftProcessors[c]->ProcessForwardFrame(target, frame, timeBuffer.data(), targetSpectrum.data());
+            stftProcessors[c]->ProcessForwardFrame(output, frame, timeBuffer.data(), outputSpectrum.data());
 
             for (size_t k = 0; k < freqBins; k++)
             {
-                float targetPower = targetReal[k] * targetReal[k] + targetImag[k] * targetImag[k];
-                float outputPower = outputReal[k] * outputReal[k] + outputImag[k] * outputImag[k];
+                const std::complex<float> t = targetSpectrum[k];
+                const std::complex<float> o = outputSpectrum[k];
+
+                float targetPower = t.real() * t.real() + t.imag() * t.imag();
+                float outputPower = o.real() * o.real() + o.imag() * o.imag();
 
                 float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
                 float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
@@ -298,15 +300,18 @@ public:
             for (size_t frame = 0; frame < outputFrames; frame++)
             {
                 // Rematerialize forward states seamlessly for this frame
-                stftProcessors[c]->ProcessForwardFrame(target, frame, targetFrame, targetReal, targetImag);
-                stftProcessors[c]->ProcessForwardFrame(output, frame, outputFrame, outputReal, outputImag);
+                stftProcessors[c]->ProcessForwardFrame(target, frame, timeBuffer.data(), targetSpectrum.data());
+                stftProcessors[c]->ProcessForwardFrame(output, frame, timeBuffer.data(), outputSpectrum.data());
+
+                // The gradient spectrum overwrites the target spectrum, bin by bin
+                std::complex<float>* gradSpectrum = targetSpectrum.data();
 
                 for (size_t k = 0; k < freqBins; k++)
                 {
-                    float outReal = outputReal[k];
-                    float outImag = outputImag[k];
-                    float tReal = targetReal[k];
-                    float tImag = targetImag[k];
+                    float outReal = outputSpectrum[k].real();
+                    float outImag = outputSpectrum[k].imag();
+                    float tReal = targetSpectrum[k].real();
+                    float tImag = targetSpectrum[k].imag();
 
                     float rawTargetPower = tReal * tReal + tImag * tImag;
                     float rawOutputPower = outReal * outReal + outImag * outImag;
@@ -338,23 +343,21 @@ public:
 
                         dLossDMag = ((dScDMag * specWeight) + (dLogDMag * logMagWeight)) * (static_cast<double>(fftSize) * 0.5);
 
-                        targetReal[k] = static_cast<float>(dLossDMag * outReal / outputMag);
-                        targetImag[k] = static_cast<float>(dLossDMag * outImag / outputMag);
+                        gradSpectrum[k] = std::complex<float>(static_cast<float>(dLossDMag * outReal / outputMag), static_cast<float>(dLossDMag * outImag / outputMag));
                     }
                     else
                     {
-                        targetReal[k] = 0.0f;
-                        targetImag[k] = 0.0f;
+                        gradSpectrum[k] = std::complex<float>(0.0f, 0.0f);
                     }
                 }
 
                 // The inverse real FFT weights DC and Nyquist by 1/N but interior bins by 2/N.
                 // After the N/2 scale above, DC and Nyquist need doubling to get the full gradient.
-                targetReal[0] *= 2.0f;
-                targetReal[freqBins - 1] *= 2.0f;
+                gradSpectrum[0].real(gradSpectrum[0].real() * 2.0f);
+                gradSpectrum[freqBins - 1].real(gradSpectrum[freqBins - 1].real() * 2.0f);
 
                 // Process backward pass and accumulate straight into outGradient via our processor instance
-                stftProcessors[c]->ProcessBackwardFrame(outGradient, frame, targetFrame, targetReal, targetImag, globalScale);
+                stftProcessors[c]->ProcessBackwardFrame(outGradient, frame, gradSpectrum, timeBuffer.data(), globalScale);
             }
         }
     }
