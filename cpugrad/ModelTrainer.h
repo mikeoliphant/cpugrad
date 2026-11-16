@@ -145,6 +145,15 @@ namespace cpugrad
 				return minLoss;
 			}
 
+			size_t GetMaxEpochs() const { return maxEpochs; }
+			size_t GetEpochsCompleted() const { return epochsCompleted; }
+			size_t GetBestEpoch() const { return bestEpoch; }	// 1-based, 0 if no epoch has completed
+			size_t GetNumThreads() const { return modelTrainerWorkers.size(); }
+			float GetLearningRate() const { return initialLearningRate; }
+			float GetLearningRateDecay() const { return learningRateDecay; }
+			size_t GetTrainingSize() const { return trainingSize; }
+			size_t GetMiniBatchSize() const { return miniBatchSize; }
+
 			void VerifyModel(const T* input, T* output, const size_t totalSamples)
 			{
 				mainWorker->VerifyModel(input, output, totalSamples);
@@ -157,8 +166,10 @@ namespace cpugrad
 
 			void TrainModel(const T* input, T* target, const size_t trainingSamples, const T* verifyInput, T* verifyTarget, const size_t verifySamples)
 			{
-				float learningRate = 0.004f;
-				float learningRateDecay = 0.993f;
+				float learningRate = initialLearningRate;
+
+				epochsCompleted = 0;
+				bestEpoch = 0;
 
 				modelBackprop->RandomizeWeights(rand);
 
@@ -166,7 +177,6 @@ namespace cpugrad
 
 				TrainingData trainingData(trainingSamples, trainingSize, receptiveField);
 
-				size_t miniBatchSize = 16;
 				size_t totBatches = trainingData.Batches().size();
 				size_t numMiniBatches = (size_t)std::ceil((float)totBatches / (float)miniBatchSize);
 
@@ -317,9 +327,12 @@ namespace cpugrad
 						std::cout << " *";
 
 						minLoss = err;
+						bestEpoch = epoch + 1;
 					}
 
 					std::cout << std::endl;
+
+					epochsCompleted = epoch + 1;
 
 					if (epochCallback)
 					{
@@ -355,6 +368,11 @@ namespace cpugrad
 
 		private:
 			size_t trainingSize = 8192;
+			size_t miniBatchSize = 16;
+			float initialLearningRate = 0.004f;
+			float learningRateDecay = 0.993f;
+			size_t epochsCompleted = 0;
+			size_t bestEpoch = 0;
 			std::mt19937 rand;
 			std::vector<std::unique_ptr<TrainerWorkerT<T, ModelType>>> modelTrainerWorkers;
 			TrainerWorkerT<T, ModelType>* mainWorker;
