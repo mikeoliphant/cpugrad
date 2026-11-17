@@ -9,8 +9,10 @@ set(BUILD_RTNEURAL OFF CACHE BOOL "")
 
 add_subdirectory(deps/NeuralAudio NeuralAudio)
 
-# FFT backend for MR-STFT: PFFFT (float SIMD, faster) or AUDIOFFT (AudioFFT's Ooura backend, double precision)
-set(CPUGRAD_FFT "PFFFT" CACHE STRING "FFT backend: PFFFT or AUDIOFFT")
+# FFT backend for MR-STFT: AUDIOFFT (AudioFFT's Ooura backend, double precision) or PFFFT (float SIMD, ~3x faster FFTs).
+# AUDIOFFT is the default: with PFFFT, 100-epoch A2 models came out measurably less accurate (mean ESR ~0.000184 vs
+# ~0.000127-0.000151 over 3 seeds), apparently from float FFT error in quiet bins, which the log-magnitude loss weights most.
+set(CPUGRAD_FFT "AUDIOFFT" CACHE STRING "FFT backend: AUDIOFFT (double precision, default) or PFFFT (faster, less accurate training)")
 set_property(CACHE CPUGRAD_FFT PROPERTY STRINGS PFFFT AUDIOFFT)
 
 if(CPUGRAD_FFT STREQUAL "PFFFT")
