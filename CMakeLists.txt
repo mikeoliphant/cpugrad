@@ -9,6 +9,24 @@ set(BUILD_RTNEURAL OFF CACHE BOOL "")
 
 add_subdirectory(deps/NeuralAudio NeuralAudio)
 
+# FFT backend for MR-STFT: AUDIOFFT (AudioFFT's Ooura backend, double precision) or PFFFT (float SIMD, ~3x faster FFTs).
+# AUDIOFFT is the default: with PFFFT, 100-epoch A2 models came out measurably less accurate (mean ESR ~0.000184 vs
+# ~0.000127-0.000151 over 3 seeds), apparently from float FFT error in quiet bins, which the log-magnitude loss weights most.
+set(CPUGRAD_FFT "AUDIOFFT" CACHE STRING "FFT backend: AUDIOFFT (double precision, default) or PFFFT (faster, less accurate training)")
+set_property(CACHE CPUGRAD_FFT PROPERTY STRINGS PFFFT AUDIOFFT)
+
+if(CPUGRAD_FFT STREQUAL "PFFFT")
+	set(FFT_SOURCES deps/pffft/pffft.c deps/pffft/pffft.h)
+	set(FFT_INCLUDE_DIR deps/pffft)
+elseif(CPUGRAD_FFT STREQUAL "AUDIOFFT")
+	set(FFT_SOURCES deps/AudioFFT/AudioFFT.cpp)
+	set(FFT_INCLUDE_DIR deps/AudioFFT)
+else()
+	message(FATAL_ERROR "CPUGRAD_FFT must be PFFFT or AUDIOFFT (got '${CPUGRAD_FFT}')")
+endif()
+
+message(STATUS "cpugrad FFT backend: ${CPUGRAD_FFT}")
+
 set(SOURCES
 	cpugrad/ModelTrainer.h
 	cpugrad/BackpropModel.h
@@ -17,15 +35,19 @@ set(SOURCES
 	cpugrad/Conv1D.h
 	cpugrad/Loss.h
 	cpugrad/MrStft.h
+	cpugrad/Fft.h
 	cpugrad/Dataset.h
 	cpugrad/Optimizer.h
 	cpugrad/BatchBuffer.h
 	cpugrad/Platform.h
-	deps/AudioFFT/AudioFFT.cpp)
+	${FFT_SOURCES})
 
 add_library(cpugrad ${SOURCES})
 target_include_directories(cpugrad PUBLIC deps/NeuralAudio/NeuralAudio)
-target_include_directories(cpugrad PRIVATE deps/AudioFFT)
+
+# Fft.h is included (via MrStft.h) by users of cpugrad, so they need the backend's header and define too
+target_include_directories(cpugrad PUBLIC ${FFT_INCLUDE_DIR})
+target_compile_definitions(cpugrad PUBLIC CPUGRAD_FFT_${CPUGRAD_FFT})
 
 target_link_libraries(cpugrad PUBLIC NeuralAudio)
 

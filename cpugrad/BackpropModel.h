@@ -210,6 +210,7 @@ namespace cpugrad
 			}
 
 		protected:
+			// Tried 4 interleaved accumulator sets for small (<=16 weight) matrices: only ~6% faster 3ch backward (1 thread), ~2% per epoch at 8 threads, so not kept
 			void ComputeDW(const float* outPtr, const float* inPtr, float* dWPtr, size_t N)
 			{
 				float dWLocal[OutChannels * InChannels] = { 0.0f };
