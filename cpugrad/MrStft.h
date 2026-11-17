@@ -156,11 +156,12 @@ private:
     cpugrad::FftVector<float> paddedGradient;
 
     // FFT working buffers, sized for the largest FFT. The input and output are separate so the input's zeros outside
-    // the window survive from frame to frame. The target spectrum is reused for the gradient spectrum.
+    // the window survive from frame to frame.
     cpugrad::FftVector<float> fftInput;
     cpugrad::FftVector<float> fftOutput;
     cpugrad::FftVector<std::complex<float>> targetSpectrum;
     cpugrad::FftVector<std::complex<float>> outputSpectrum;
+    cpugrad::FftVector<std::complex<float>> gradSpectrum;
 
     const T epsilon = static_cast<T>(1e-8);
     // Spectral convergence defaults to off for training: per-segment SC blows up on near-silent segments,
@@ -195,6 +196,7 @@ public:
         fftOutput.resize(maxFft);
         targetSpectrum.resize((maxFft / 2) + 1);
         outputSpectrum.resize((maxFft / 2) + 1);
+        gradSpectrum.resize((maxFft / 2) + 1);
     }
 
     ~MultiResolutionStftLossT() override = default;
@@ -256,6 +258,12 @@ public:
             double denominator = sqrtDiff * sqrtTarget;
             double safe_denominator = std::max(denominator, static_cast<double>(epsilon));
 
+            // d(loss)/d|X| = scDiffScale * (|X| - |T|) + logScale * sign(|X| - |T|) / |X|, where X is the output's and T the
+            // target's spectrum. Both scales include the N/2 factor for the inverse FFT's scaling.
+            const float scDiffScale = static_cast<float>(specWeight * (static_cast<double>(fftSize) * 0.5) / safe_denominator);
+            const float logScale = static_cast<float>(logMagWeight * (static_cast<double>(fftSize) * 0.5) / logDenom);
+            const float eps = static_cast<float>(epsilon);
+
             processor.ClearFftInput(fftInput.data());
 
             for (size_t frame = 0; frame < outputFrames; frame++)
@@ -266,52 +274,36 @@ public:
                 processor.ForwardFrame(paddedTarget.data() + frameStart, fftInput.data(), targetSpectrum.data());
                 processor.ForwardFrame(paddedOutput.data() + frameStart, fftInput.data(), outputSpectrum.data());
 
-                // The gradient spectrum overwrites the target spectrum, bin by bin
-                std::complex<float>* gradSpectrum = targetSpectrum.data();
+                // Interleaved real/imaginary values. The gradient gets its own buffer, so the loop can vectorize.
+                const float* __restrict tgt = reinterpret_cast<const float*>(targetSpectrum.data());
+                const float* __restrict out = reinterpret_cast<const float*>(outputSpectrum.data());
+                float* __restrict grad = reinterpret_cast<float*>(gradSpectrum.data());
 
                 for (size_t k = 0; k < freqBins; k++)
                 {
-                    float outReal = outputSpectrum[k].real();
-                    float outImag = outputSpectrum[k].imag();
-                    float tReal = targetSpectrum[k].real();
-                    float tImag = targetSpectrum[k].imag();
+                    const float outReal = out[2 * k];
+                    const float outImag = out[2 * k + 1];
+                    const float tReal = tgt[2 * k];
+                    const float tImag = tgt[2 * k + 1];
 
-                    float rawTargetPower = tReal * tReal + tImag * tImag;
-                    float rawOutputPower = outReal * outReal + outImag * outImag;
+                    const float outputPower = outReal * outReal + outImag * outImag;
+                    const float targetPower = tReal * tReal + tImag * tImag;
 
-                    float targetMag = std::sqrt(std::max(rawTargetPower, static_cast<float>(epsilon)));
-                    float outputMag = std::sqrt(std::max(rawOutputPower, static_cast<float>(epsilon)));
+                    const float outputMag = std::sqrt(std::max(outputPower, eps));
+                    const float targetMag = std::sqrt(std::max(targetPower, eps));
+                    const float invOutputMag = 1.0f / outputMag;
 
-                    double dLossDMag = 0.0;
+                    const float magDiff = outputMag - targetMag;
+                    const float sign = (magDiff > 0.0f) ? 1.0f : ((magDiff < 0.0f) ? -1.0f : 0.0f);
 
                     // Match torch clamp(power, eps) backward: no gradient flows through clamped bins
-                    if (rawOutputPower >= static_cast<float>(epsilon))
-                    {
-                        double dScDMag = 0.0;
+                    const float dLossDMag = (outputPower >= eps) ? ((scDiffScale * magDiff) + (logScale * sign * invOutputMag)) : 0.0f;
 
-                        dScDMag = (outputMag - targetMag) / safe_denominator;
+                    // d|X|/dX = X / |X|
+                    const float gradScale = dLossDMag * invOutputMag;
 
-                        double dLogDMag = 0.0;
-
-                        double magDifference = static_cast<double>(outputMag) - static_cast<double>(targetMag);
-
-                        double sign = 0.0;
-
-                        if (std::abs(magDifference) > 0)
-                        {
-                            sign = (magDifference > 0.0) ? 1.0 : -1.0;
-
-                            dLogDMag = (sign / (logDenom * static_cast<double>(outputMag)));
-                        }
-
-                        dLossDMag = ((dScDMag * specWeight) + (dLogDMag * logMagWeight)) * (static_cast<double>(fftSize) * 0.5);
-
-                        gradSpectrum[k] = std::complex<float>(static_cast<float>(dLossDMag * outReal / outputMag), static_cast<float>(dLossDMag * outImag / outputMag));
-                    }
-                    else
-                    {
-                        gradSpectrum[k] = std::complex<float>(0.0f, 0.0f);
-                    }
+                    grad[2 * k] = gradScale * outReal;
+                    grad[2 * k + 1] = gradScale * outImag;
                 }
 
                 // The inverse real FFT weights DC and Nyquist by 1/N but interior bins by 2/N.
@@ -319,7 +311,7 @@ public:
                 gradSpectrum[0].real(gradSpectrum[0].real() * 2.0f);
                 gradSpectrum[freqBins - 1].real(gradSpectrum[freqBins - 1].real() * 2.0f);
 
-                processor.BackwardFrame(paddedGradient.data() + frameStart, gradSpectrum, fftOutput.data(), globalScale);
+                processor.BackwardFrame(paddedGradient.data() + frameStart, gradSpectrum.data(), fftOutput.data(), globalScale);
             }
         }
 
