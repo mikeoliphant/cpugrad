@@ -7,7 +7,9 @@
 #include <algorithm>
 #include <memory>
 #include <cstring>
+#include <limits>
 #include <numbers>
+#include <stdexcept>
 
 #include "Loss.h"
 #include "Fft.h"
@@ -19,8 +21,9 @@ struct StftWindowConfig
     size_t WindowSize;
 };
 
-// STFT framing (reflect padding, Hann window, overlap-add) for one resolution. The time and spectrum buffers are passed
-// in by the caller: GetFftSize() floats and GetFreqBins() bins, aligned to cpugrad::Fft::RequiredAlignment.
+// STFT framing (Hann window, overlap-add) for one resolution. Frames read from, and write their gradient into, an
+// already reflect-padded signal (padded by GetPadSize() = FftSize / 2 on each side). Buffers are passed in by the caller:
+// the FFT input/output are GetFftSize() floats and the spectrum GetFreqBins() bins, aligned to cpugrad::Fft::RequiredAlignment.
 template <typename T>
 class StftFrameProcessor
 {
@@ -58,43 +61,49 @@ public:
 
     // Informational structural query methods
     size_t GetFftSize() const noexcept { return fftSize; }
+    size_t GetHopSize() const noexcept { return hopSize; }
+    size_t GetPadSize() const noexcept { return padSize; }
     size_t GetOutputFrames() const noexcept { return outputFrames; }
     size_t GetFreqBins() const noexcept { return freqBins; }
 
-    // Extracts and windows one frame into timeBuffer, then transforms it into spectrum
-    void ProcessForwardFrame(const T* __restrict audioTimeline, size_t frameIdx, float* timeBuffer, std::complex<float>* spectrum)
+    // Zeroes the FFT input buffer. ForwardFrame() only rewrites the window part, so this is needed once per resolution
+    // (not per frame), as long as the buffer isn't used for anything else in between.
+    void ClearFftInput(float* fftInput) const
     {
-        size_t sampleStart = frameIdx * hopSize;
+        std::fill(fftInput, fftInput + fftSize, 0.0f);
+    }
 
-        std::fill(timeBuffer, timeBuffer + fftSize, 0.0f);
+    // Windows one frame into fftInput and transforms it into spectrum. frameSamples points at the frame's first sample
+    // in the padded signal.
+    void ForwardFrame(const float* __restrict frameSamples, float* __restrict fftInput, std::complex<float>* spectrum)
+    {
+        const float* __restrict windowSamples = frameSamples + frameOffset;
+        float* __restrict windowDest = fftInput + frameOffset;
 
         for (size_t i = 0; i < windowSize; ++i)
         {
-            size_t paddedIdx = sampleStart + frameOffset + i;
-            float sample = GetReflectSample(audioTimeline, paddedIdx);
-
-            timeBuffer[frameOffset + i] = sample * hannWindow[i];
+            windowDest[i] = windowSamples[i] * hannWindow[i];
         }
 
-        fft.Forward(timeBuffer, spectrum);
+        fft.Forward(fftInput, spectrum);
     }
 
-    // Transforms one frame's gradient spectrum back (via timeBuffer) and overlap-adds it into outGradient.
-    // gradSpectrum is used as scratch space.
-    void ProcessBackwardFrame(T* __restrict outGradient, size_t frameIdx, std::complex<float>* gradSpectrum, float* timeBuffer, double externalScale)
+    // Transforms one frame's gradient spectrum back into fftOutput and overlap-adds it into the padded gradient, from the
+    // frame's first sample (frameGradient). gradSpectrum is used as scratch space.
+    void BackwardFrame(float* __restrict frameGradient, std::complex<float>* gradSpectrum, float* __restrict fftOutput, double externalScale)
     {
-        fft.Inverse(gradSpectrum, timeBuffer);
+        fft.Inverse(gradSpectrum, fftOutput);
 
         const double scale = externalScale * fft.InverseScale();
 
-        size_t sampleStart = frameIdx * hopSize;
+        const float* __restrict windowResult = fftOutput + frameOffset;
+        float* __restrict windowGradient = frameGradient + frameOffset;
 
         for (size_t i = 0; i < windowSize; ++i)
         {
-            size_t paddedIdx = sampleStart + frameOffset + i;
-            float windowedGradSample = timeBuffer[frameOffset + i] * hannWindow[i];
+            float windowedGradSample = windowResult[i] * hannWindow[i];
 
-            AccumulateReflectGradient(outGradient, paddedIdx, static_cast<float>(windowedGradSample * scale));
+            windowGradient[i] += static_cast<float>(windowedGradSample * scale);
         }
     }
 
@@ -106,53 +115,6 @@ private:
         double squaredOverlapSum = 0.375 * overlapRatio;
 
         return (linearOverlapSum / squaredOverlapSum) * 0.5;
-    }
-
-    inline float GetReflectSample(const T* audio, size_t paddedIdx) const
-    {
-        if (paddedIdx < padSize)
-        {
-            return static_cast<float>(audio[padSize - paddedIdx]);
-        }
-
-        size_t actualIdx = paddedIdx - padSize;
-
-        if (actualIdx < numSamples)
-        {
-            return static_cast<float>(audio[actualIdx]);
-        }
-
-        size_t rightReflectIdx = numSamples - 2 - (actualIdx - numSamples);
-
-        return static_cast<float>(audio[rightReflectIdx]);
-    }
-
-    inline void AccumulateReflectGradient(T* outGradient, size_t paddedIdx, float value) const
-    {
-        if (paddedIdx < padSize)
-        {
-            size_t reflectIdx = padSize - paddedIdx;
-            if (reflectIdx < numSamples)
-            {
-                outGradient[reflectIdx] += static_cast<T>(value);
-            }
-            return;
-        }
-
-        size_t actualIdx = paddedIdx - padSize;
-
-        if (actualIdx < numSamples)
-        {
-            outGradient[actualIdx] += static_cast<T>(value);
-            return;
-        }
-
-        size_t rightReflectIdx = numSamples - 2 - (actualIdx - numSamples);
-
-        if (rightReflectIdx < numSamples)
-        {
-            outGradient[rightReflectIdx] += static_cast<T>(value);
-        }
     }
 
     size_t fftSize;
@@ -186,8 +148,17 @@ private:
     std::vector<std::unique_ptr<StftFrameProcessor<T>>> stftProcessors;
     std::vector<StftWindowConfig> configurations;
 
-    // Working buffers, sized for the largest FFT. The target spectrum is reused for the gradient spectrum.
-    cpugrad::FftVector<float> timeBuffer;
+    // The output, target and gradient are reflect-padded once, by maxPad (half the largest FFT size). Reflect padding
+    // nests, so a resolution with a smaller pad p finds its padded signal at offset maxPad - p.
+    size_t maxPad = 0;
+    cpugrad::FftVector<float> paddedOutput;
+    cpugrad::FftVector<float> paddedTarget;
+    cpugrad::FftVector<float> paddedGradient;
+
+    // FFT working buffers, sized for the largest FFT. The input and output are separate so the input's zeros outside
+    // the window survive from frame to frame. The target spectrum is reused for the gradient spectrum.
+    cpugrad::FftVector<float> fftInput;
+    cpugrad::FftVector<float> fftOutput;
     cpugrad::FftVector<std::complex<float>> targetSpectrum;
     cpugrad::FftVector<std::complex<float>> outputSpectrum;
 
@@ -218,7 +189,10 @@ public:
             maxFft = std::max(maxFft, config.FftSize);
         }
 
-        timeBuffer.resize(maxFft);
+        maxPad = maxFft / 2;
+
+        fftInput.resize(maxFft);
+        fftOutput.resize(maxFft);
         targetSpectrum.resize((maxFft / 2) + 1);
         outputSpectrum.resize((maxFft / 2) + 1);
     }
@@ -238,57 +212,41 @@ public:
         this->logMagWeight = logMagWeight;
     }
 
-    // Spectral metrics summed over frames [firstFrame, endFrame) of resolution c
-    StftLossMetrics ComputeForwardMetricsForScale(size_t c, const T* output, const T* target, size_t firstFrame, size_t endFrame, size_t freqBins)
-    {
-        StftLossMetrics metrics = { 0.0, 0.0, 0.0 };
-
-        for (size_t frame = firstFrame; frame < endFrame; frame++)
-        {
-            stftProcessors[c]->ProcessForwardFrame(target, frame, timeBuffer.data(), targetSpectrum.data());
-            stftProcessors[c]->ProcessForwardFrame(output, frame, timeBuffer.data(), outputSpectrum.data());
-
-            for (size_t k = 0; k < freqBins; k++)
-            {
-                const std::complex<float> t = targetSpectrum[k];
-                const std::complex<float> o = outputSpectrum[k];
-
-                float targetPower = t.real() * t.real() + t.imag() * t.imag();
-                float outputPower = o.real() * o.real() + o.imag() * o.imag();
-
-                float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
-                float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
-
-                float magDiff = targetMag - outputMag;
-                metrics.FrobeniusDiff += magDiff * magDiff;
-                metrics.FrobeniusTarget += targetMag * targetMag;
-
-                metrics.L1LogDiff += std::abs(std::log(targetMag) - std::log(outputMag));
-            }
-        }
-
-        return metrics;
-    }
-
     void ComputeLoss(const T* __restrict output, const T* __restrict target, T* __restrict outGradient, size_t numSamples, double scaleFactor) override
     {
         // Per-resolution losses are already means (over frames x bins), so only average across resolutions
         double globalScale = scaleFactor / static_cast<double>(configurations.size());
 
+        const size_t paddedLength = numSamples + (2 * maxPad);
+
+        PadSignal(output, numSamples, 0, paddedLength, paddedOutput);
+        PadSignal(target, numSamples, 0, paddedLength, paddedTarget);
+
+        // The padded gradient's interior starts as the incoming gradient, so interior samples get their additions in the
+        // same order as adding into outGradient directly. The pads start at zero and are folded back in at the end.
+        if (paddedGradient.size() < paddedLength)
+            paddedGradient.resize(paddedLength);
+
+        std::fill(paddedGradient.begin(), paddedGradient.begin() + maxPad, 0.0f);
+        std::copy(outGradient, outGradient + numSamples, paddedGradient.begin() + maxPad);
+        std::fill(paddedGradient.begin() + maxPad + numSamples, paddedGradient.begin() + paddedLength, 0.0f);
+
         for (size_t c = 0; c < configurations.size(); c++)
         {
-            stftProcessors[c]->SetNumSamples(numSamples);
+            StftFrameProcessor<T>& processor = *stftProcessors[c];
+
+            processor.SetNumSamples(numSamples);
 
             size_t fftSize = configurations[c].FftSize;
-            size_t outputFrames = stftProcessors[c]->GetOutputFrames();
-            size_t freqBins = stftProcessors[c]->GetFreqBins();
+            size_t outputFrames = processor.GetOutputFrames();
+            size_t freqBins = processor.GetFreqBins();
 
             // The forward metrics pass only supplies the spectral convergence norms, so skip it when SC is off
             StftLossMetrics metrics = { 0.0, 0.0, 0.0 };
 
             if (specWeight != 0.0)
             {
-                metrics = ComputeForwardMetricsForScale(c, output, target, 0, outputFrames, freqBins);
+                metrics = ComputeForwardMetricsForScale(c, paddedOutput.data(), paddedTarget.data(), 0, 0, outputFrames, freqBins);
             }
 
             // --- PASS 2: Adjoint Backpropagation Pass ---
@@ -298,11 +256,15 @@ public:
             double denominator = sqrtDiff * sqrtTarget;
             double safe_denominator = std::max(denominator, static_cast<double>(epsilon));
 
+            processor.ClearFftInput(fftInput.data());
+
             for (size_t frame = 0; frame < outputFrames; frame++)
             {
+                const size_t frameStart = FrameStart(c, frame, 0);
+
                 // Rematerialize forward states seamlessly for this frame
-                stftProcessors[c]->ProcessForwardFrame(target, frame, timeBuffer.data(), targetSpectrum.data());
-                stftProcessors[c]->ProcessForwardFrame(output, frame, timeBuffer.data(), outputSpectrum.data());
+                processor.ForwardFrame(paddedTarget.data() + frameStart, fftInput.data(), targetSpectrum.data());
+                processor.ForwardFrame(paddedOutput.data() + frameStart, fftInput.data(), outputSpectrum.data());
 
                 // The gradient spectrum overwrites the target spectrum, bin by bin
                 std::complex<float>* gradSpectrum = targetSpectrum.data();
@@ -357,10 +319,11 @@ public:
                 gradSpectrum[0].real(gradSpectrum[0].real() * 2.0f);
                 gradSpectrum[freqBins - 1].real(gradSpectrum[freqBins - 1].real() * 2.0f);
 
-                // Process backward pass and accumulate straight into outGradient via our processor instance
-                stftProcessors[c]->ProcessBackwardFrame(outGradient, frame, gradSpectrum, timeBuffer.data(), globalScale);
+                processor.BackwardFrame(paddedGradient.data() + frameStart, gradSpectrum, fftOutput.data(), globalScale);
             }
         }
+
+        UnpadGradient(numSamples, outGradient);
     }
 
     // GetMeanLoss() comes from LossT, via these.
@@ -373,13 +336,39 @@ public:
 
     void AccumulateMeanStatistics(const T* output, const T* target, size_t numSamples, size_t part, size_t numParts, double* stats) override
     {
+        // This part's frames at each resolution, and the stretch of the padded signal they cover between them
+        std::vector<std::pair<size_t, size_t>> frameRanges(configurations.size());
+
+        size_t spanStart = std::numeric_limits<size_t>::max();
+        size_t spanEnd = 0;
+
         for (size_t c = 0; c < configurations.size(); c++)
         {
             stftProcessors[c]->SetNumSamples(numSamples);
 
-            auto [firstFrame, endFrame] = this->PartRange(stftProcessors[c]->GetOutputFrames(), part, numParts);
+            frameRanges[c] = this->PartRange(stftProcessors[c]->GetOutputFrames(), part, numParts);
 
-            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, output, target, firstFrame, endFrame, stftProcessors[c]->GetFreqBins());
+            auto [firstFrame, endFrame] = frameRanges[c];
+
+            if (firstFrame < endFrame)
+            {
+                spanStart = std::min(spanStart, FrameStart(c, firstFrame, 0));
+                spanEnd = std::max(spanEnd, FrameStart(c, endFrame - 1, 0) + stftProcessors[c]->GetFftSize());
+            }
+        }
+
+        if (spanStart >= spanEnd)
+            return;	// no frames in this part
+
+        // Only pad the stretch this part needs
+        PadSignal(output, numSamples, spanStart, spanEnd, paddedOutput);
+        PadSignal(target, numSamples, spanStart, spanEnd, paddedTarget);
+
+        for (size_t c = 0; c < configurations.size(); c++)
+        {
+            auto [firstFrame, endFrame] = frameRanges[c];
+
+            StftLossMetrics metrics = ComputeForwardMetricsForScale(c, paddedOutput.data(), paddedTarget.data(), spanStart, firstFrame, endFrame, stftProcessors[c]->GetFreqBins());
 
             stats[3 * c] += metrics.FrobeniusDiff;
             stats[3 * c + 1] += metrics.FrobeniusTarget;
@@ -409,5 +398,102 @@ public:
         }
 
         return totalMrLoss / static_cast<float>(configurations.size());
+    }
+
+private:
+    // Position of frame "frame" of resolution c in the maxPad-padded signal, relative to a buffer that starts at
+    // padded position bufferStart
+    size_t FrameStart(size_t c, size_t frame, size_t bufferStart) const
+    {
+        return (maxPad - stftProcessors[c]->GetPadSize()) + (frame * stftProcessors[c]->GetHopSize()) - bufferStart;
+    }
+
+    // Spectral metrics summed over frames [firstFrame, endFrame) of resolution c. The padded buffers start at padded
+    // position bufferStart.
+    StftLossMetrics ComputeForwardMetricsForScale(size_t c, const float* paddedOut, const float* paddedTgt, size_t bufferStart, size_t firstFrame, size_t endFrame, size_t freqBins)
+    {
+        StftLossMetrics metrics = { 0.0, 0.0, 0.0 };
+
+        StftFrameProcessor<T>& processor = *stftProcessors[c];
+
+        processor.ClearFftInput(fftInput.data());
+
+        for (size_t frame = firstFrame; frame < endFrame; frame++)
+        {
+            const size_t frameStart = FrameStart(c, frame, bufferStart);
+
+            processor.ForwardFrame(paddedTgt + frameStart, fftInput.data(), targetSpectrum.data());
+            processor.ForwardFrame(paddedOut + frameStart, fftInput.data(), outputSpectrum.data());
+
+            for (size_t k = 0; k < freqBins; k++)
+            {
+                const std::complex<float> t = targetSpectrum[k];
+                const std::complex<float> o = outputSpectrum[k];
+
+                float targetPower = t.real() * t.real() + t.imag() * t.imag();
+                float outputPower = o.real() * o.real() + o.imag() * o.imag();
+
+                float targetMag = std::sqrt(std::max(targetPower, static_cast<float>(epsilon)));
+                float outputMag = std::sqrt(std::max(outputPower, static_cast<float>(epsilon)));
+
+                float magDiff = targetMag - outputMag;
+                metrics.FrobeniusDiff += magDiff * magDiff;
+                metrics.FrobeniusTarget += targetMag * targetMag;
+
+                metrics.L1LogDiff += std::abs(std::log(targetMag) - std::log(outputMag));
+            }
+        }
+
+        return metrics;
+    }
+
+    // Fills dest with positions [spanStart, spanEnd) of the signal reflect-padded by maxPad on each side
+    // (like torch's reflect padding: the edge sample itself isn't repeated)
+    void PadSignal(const T* signal, size_t numSamples, size_t spanStart, size_t spanEnd, cpugrad::FftVector<float>& dest) const
+    {
+        if (maxPad >= numSamples)
+            throw std::invalid_argument("MR-STFT needs more samples than half its largest FFT size, for reflect padding");
+
+        if (dest.size() < (spanEnd - spanStart))
+            dest.resize(spanEnd - spanStart);
+
+        float* out = dest.data();
+
+        for (size_t pos = spanStart; pos < spanEnd; pos++)
+        {
+            size_t sampleIndex;
+
+            if (pos < maxPad)
+                sampleIndex = maxPad - pos;		// left reflection
+            else if ((pos - maxPad) < numSamples)
+                sampleIndex = pos - maxPad;		// the signal itself
+            else
+                sampleIndex = numSamples - 2 - (pos - maxPad - numSamples);	// right reflection
+
+            *(out++) = static_cast<float>(signal[sampleIndex]);
+        }
+    }
+
+    // Folds the padded gradient's reflected parts back onto the samples they mirror, and writes the result to outGradient
+    void UnpadGradient(size_t numSamples, T* outGradient) const
+    {
+        const float* padded = paddedGradient.data();
+
+        for (size_t i = 0; i < numSamples; i++)
+        {
+            outGradient[i] = static_cast<T>(padded[maxPad + i]);
+        }
+
+        // Left pad: padded position p (< maxPad) mirrors sample maxPad - p
+        for (size_t p = 0; p < maxPad; p++)
+        {
+            outGradient[maxPad - p] += static_cast<T>(padded[p]);
+        }
+
+        // Right pad: padded position maxPad + numSamples + m mirrors sample numSamples - 2 - m
+        for (size_t m = 0; m < maxPad; m++)
+        {
+            outGradient[numSamples - 2 - m] += static_cast<T>(padded[maxPad + numSamples + m]);
+        }
     }
  };

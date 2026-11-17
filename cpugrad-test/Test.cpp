@@ -87,20 +87,33 @@ void STFTTestTorch()
 
 	std::vector<float> targetVec = TensorToVector(targetSignal);
 
-	std::vector<float> frameData(fft_size);
-	std::vector<float> realData(num_bins);
-	std::vector<float> imagData(num_bins);
+	// The frame processor reads an already reflect-padded signal (as torch.stft does with center=True)
+	const size_t pad = cpugradStft.GetPadSize();
+	std::vector<float> paddedTarget(targetVec.size() + 2 * pad);
+
+	for (size_t pos = 0; pos < paddedTarget.size(); pos++)
+	{
+		size_t n = targetVec.size();
+		size_t index = (pos < pad) ? (pad - pos) : (((pos - pad) < n) ? (pos - pad) : (n - 2 - (pos - pad - n)));
+
+		paddedTarget[pos] = targetVec[index];
+	}
+
+	cpugrad::FftVector<float> frameData(fft_size);
+	cpugrad::FftVector<std::complex<float>> spectrum(num_bins);
+
+	cpugradStft.ClearFftInput(frameData.data());
 
 	for (int64_t f = 0; f < num_frames; ++f)
 	{
-		cpugradStft.ProcessForwardFrame(targetVec.data(), f, frameData, realData, imagData);
+		cpugradStft.ForwardFrame(paddedTarget.data() + (f * hop_size), frameData.data(), spectrum.data());
 
 		for (int64_t k = 0; k < num_bins; ++k)
 		{
 			float real = stft_acc[0][k][f][0];
 			float imag = stft_acc[0][k][f][1];
 
-			mse += ((real - realData[k]) * (real - realData[k])) + ((imag - imagData[k]) * (imag - imagData[k]));
+			mse += ((real - spectrum[k].real()) * (real - spectrum[k].real())) + ((imag - spectrum[k].imag()) * (imag - spectrum[k].imag()));
 		}
 	}
 
